@@ -43,8 +43,8 @@ def home():
     # └── osdi.jpg
     #
     # =====================================================
-    left_image_path = "image/ccmq.png"
-    right_image_path = "image/osdi.png"
+    left_image_path = "image/CCMQ.png"
+    right_image_path = "image/OSDI.png"
 
     left_bg = get_base64_image(left_image_path)
     right_bg = get_base64_image(right_image_path)
