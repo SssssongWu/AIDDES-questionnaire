@@ -16,11 +16,9 @@ st.set_page_config(
 
 # =========================================================
 # Image → Base64
-# 之後把圖片放進專案，例如：
-# images/ccmq.jpg
-# images/osdi.jpg
 # =========================================================
 def get_base64_image(image_path):
+
     path = Path(image_path)
 
     if not path.exists():
@@ -35,187 +33,383 @@ def get_base64_image(image_path):
 # =========================================================
 def home():
 
-    # -----------------------------------------------------
-    # 之後只要修改這兩個圖片路徑
-    # -----------------------------------------------------
-    left_image_path = "image/CCMQ.jpg"
-    right_image_path = "image/OSDI.jpg"
+    # =====================================================
+    # 圖片路徑
+    #
+    # GitHub 專案請確認：
+    #
+    # image/
+    # ├── ccmq.jpg
+    # └── osdi.jpg
+    #
+    # =====================================================
+    left_image_path = "image/ccmq.png"
+    right_image_path = "image/osdi.png"
 
     left_bg = get_base64_image(left_image_path)
     right_bg = get_base64_image(right_image_path)
 
-    # 如果圖片還沒放，先給純色背景
+
+    # =====================================================
+    # 背景
+    # =====================================================
+
     if left_bg:
-        left_background = f"""
-        linear-gradient(
-            rgba(75, 65, 58, 0.25),
-            rgba(75, 65, 58, 0.25)
-        ),
-        url("data:image/jpeg;base64,{left_bg}")
-        """
+
+        left_background = (
+            "linear-gradient("
+            "rgba(70, 60, 52, 0.20), "
+            "rgba(70, 60, 52, 0.20)"
+            "), "
+            f'url("data:image/jpeg;base64,{left_bg}")'
+        )
+
     else:
-        left_background = "#b5aa9d"
+
+        left_background = "#B9AFA5"
+
 
     if right_bg:
-        right_background = f"""
-        linear-gradient(
-            rgba(75, 65, 58, 0.25),
-            rgba(75, 65, 58, 0.25)
-        ),
-        url("data:image/jpeg;base64,{right_bg}")
-        """
-    else:
-        right_background = "#a89d91"
 
-    # -----------------------------------------------------
+        right_background = (
+            "linear-gradient("
+            "rgba(70, 60, 52, 0.20), "
+            "rgba(70, 60, 52, 0.20)"
+            "), "
+            f'url("data:image/jpeg;base64,{right_bg}")'
+        )
+
+    else:
+
+        right_background = "#AAA096"
+
+
+    # =====================================================
     # CSS
-    # -----------------------------------------------------
+    # =====================================================
     st.markdown(
         f"""
         <style>
 
-        /* 移除 Streamlit 預設空白 */
-        .block-container {{
-            padding-top: 0rem !important;
-            padding-bottom: 0rem !important;
-            padding-left: 0rem !important;
-            padding-right: 0rem !important;
+        /* ============================================
+           Streamlit 預設樣式清除
+        ============================================ */
+
+        html,
+        body {{
+            margin: 0 !important;
+            padding: 0 !important;
+            overflow: hidden !important;
+        }}
+
+
+        [data-testid="stAppViewContainer"] {{
+            margin: 0 !important;
+            padding: 0 !important;
+        }}
+
+
+        [data-testid="stMain"] {{
+            margin: 0 !important;
+            padding: 0 !important;
+        }}
+
+
+        [data-testid="stMainBlockContainer"] {{
+            padding: 0 !important;
+            margin: 0 !important;
             max-width: 100% !important;
         }}
 
-        header {{
-            visibility: hidden;
+
+        .block-container {{
+            padding: 0 !important;
+            margin: 0 !important;
+            max-width: 100% !important;
         }}
+
+
+        header {{
+            display: none !important;
+        }}
+
 
         footer {{
-            visibility: hidden;
+            display: none !important;
         }}
+
 
         #MainMenu {{
-            visibility: hidden;
+            display: none !important;
         }}
 
-        /* 整個首頁 */
+
+        /* ============================================
+           首頁外層
+        ============================================ */
+
         .aid-home {{
             position: relative;
-            width: 100%;
+
+            width: 100vw;
             height: 100vh;
+
+            display: flex;
+
+            margin: 0;
+            padding: 0;
+
             overflow: hidden;
+
+            background-color: #EEEAE6;
         }}
 
-        /* 中央標題 */
-        .aid-title {{
+
+        /* ============================================
+           中央標題
+        ============================================ */
+
+        .aid-main-title {{
+
             position: absolute;
-            top: 7%;
+
+            top: 6%;
             left: 50%;
+
             transform: translateX(-50%);
 
-            background-color: #75665B;
+            z-index: 100;
+
+            background-color: rgba(177, 160, 147, 0.94);
 
             color: white;
+
             font-size: 30px;
             font-weight: 600;
 
-            padding: 14px 38px;
+            letter-spacing: 4px;
 
-            border-radius: 16px;
+            padding: 15px 42px;
 
-            z-index: 10;
-
-            letter-spacing: 3px;
-
-            box-shadow:
-                0px 5px 18px rgba(0, 0, 0, 0.15);
+            border-radius: 18px;
 
             white-space: nowrap;
+
+            box-shadow:
+                0 5px 18px rgba(0, 0, 0, 0.13);
         }}
 
-        /* 左右容器 */
-        .choice-container {{
-            display: flex;
-            width: 100%;
-            height: 100vh;
-        }}
 
-        /* 共用左右區塊 */
-        .choice {{
+        /* ============================================
+           左右選擇區
+        ============================================ */
+
+        .survey-choice {{
+
             position: relative;
 
             width: 50%;
-            height: 100%;
+            height: 100vh;
 
             display: flex;
+
             justify-content: center;
             align-items: center;
 
-            background-size: cover;
-            background-position: center;
-            background-repeat: no-repeat;
+            margin: 0;
+            padding: 0;
 
             overflow: hidden;
 
+            text-decoration: none !important;
+
+            cursor: pointer;
+
+            background-size: cover !important;
+            background-position: center !important;
+            background-repeat: no-repeat !important;
+
             transition:
-                transform 0.35s ease,
-                filter 0.35s ease;
+                filter 0.35s ease,
+                transform 0.35s ease;
         }}
 
-        /* 左背景 */
-        .choice-left {{
+
+        /* ============================================
+           左邊
+        ============================================ */
+
+        .left-choice {{
+
             background: {left_background};
-            background-size: cover;
-            background-position: center;
+
+            border-right:
+                1px solid rgba(255, 255, 255, 0.35);
         }}
 
-        /* 右背景 */
-        .choice-right {{
+
+        /* ============================================
+           右邊
+        ============================================ */
+
+        .right-choice {{
             background: {right_background};
-            background-size: cover;
-            background-position: center;
         }}
 
-        /* hover */
-        .choice:hover {{
-            filter: brightness(1.07);
+
+        /* ============================================
+           Hover
+        ============================================ */
+
+        .survey-choice:hover {{
+            filter: brightness(1.08);
         }}
 
-        /* 問卷名稱 */
-        .choice-text {{
-            color: white;
 
-            font-size: 34px;
-            font-weight: 600;
+        .survey-choice:hover .survey-content {{
+            transform: translateY(-5px);
+        }}
 
-            text-shadow:
-                0px 2px 10px rgba(0,0,0,0.45);
 
-            letter-spacing: 3px;
+        /* ============================================
+           中央文字區
+        ============================================ */
+
+        .survey-content {{
+
+            position: relative;
+
+            z-index: 10;
 
             text-align: center;
 
-            z-index: 2;
+            color: white;
+
+            transition: transform 0.35s ease;
         }}
 
-        /* 小螢幕 */
+
+        .survey-title {{
+
+            font-size: 36px;
+
+            font-weight: 600;
+
+            letter-spacing: 4px;
+
+            color: white;
+
+            text-shadow:
+                0px 3px 14px rgba(0, 0, 0, 0.50);
+        }}
+
+
+        .survey-subtitle {{
+
+            margin-top: 14px;
+
+            font-size: 16px;
+
+            font-weight: 400;
+
+            letter-spacing: 2px;
+
+            color: rgba(255, 255, 255, 0.95);
+
+            text-shadow:
+                0px 2px 8px rgba(0, 0, 0, 0.40);
+        }}
+
+
+        /* ============================================
+           中間淡色遮罩
+           讓文字更好看
+        ============================================ */
+
+        .survey-choice::after {{
+
+            content: "";
+
+            position: absolute;
+
+            top: 0;
+            left: 0;
+
+            width: 100%;
+            height: 100%;
+
+            background:
+                linear-gradient(
+                    to bottom,
+                    rgba(0,0,0,0.03),
+                    rgba(0,0,0,0.05)
+                );
+
+            pointer-events: none;
+        }}
+
+
+        /* ============================================
+           手機版
+        ============================================ */
+
         @media (max-width: 768px) {{
 
-            .choice-container {{
-                flex-direction: column;
+            html,
+            body {{
+                overflow-y: auto !important;
             }}
 
-            .choice {{
+
+            .aid-home {{
+
+                flex-direction: column;
+
+                width: 100vw;
+                height: 100vh;
+            }}
+
+
+            .survey-choice {{
+
                 width: 100%;
+
                 height: 50vh;
             }}
 
-            .aid-title {{
-                top: 3%;
-                font-size: 21px;
-                padding: 10px 24px;
+
+            .left-choice {{
+
+                border-right: none;
+
+                border-bottom:
+                    1px solid rgba(255,255,255,0.35);
             }}
 
-            .choice-text {{
-                font-size: 25px;
+
+            .aid-main-title {{
+
+                top: 3%;
+
+                font-size: 21px;
+
+                padding: 11px 24px;
+
+                letter-spacing: 3px;
+
+                border-radius: 14px;
             }}
+
+
+            .survey-title {{
+                font-size: 27px;
+            }}
+
+
+            .survey-subtitle {{
+                font-size: 14px;
+            }}
+
         }}
 
         </style>
@@ -223,137 +417,111 @@ def home():
         unsafe_allow_html=True
     )
 
+
     # =====================================================
-    # 標題
+    # HTML
+    #
+    # 整個左右區塊都是 <a>
+    # 所以任何地方都可以點
     # =====================================================
+
     st.markdown(
         """
-        <div class="aid-title">
-            AIDDES問卷填寫
+        <div class="aid-home">
+
+            <!-- ================================
+                 中央標題
+            ================================= -->
+
+            <div class="aid-main-title">
+                AIDDES 問卷填寫
+            </div>
+
+
+            <!-- ================================
+                 左邊：中醫體質量表
+            ================================= -->
+
+            <a
+                href="/CCMQ"
+                target="_self"
+                class="survey-choice left-choice"
+            >
+
+                <div class="survey-content">
+
+                    <div class="survey-title">
+                        中醫體質量表
+                    </div>
+
+                    <div class="survey-subtitle">
+                        點擊進入填寫
+                    </div>
+
+                </div>
+
+            </a>
+
+
+            <!-- ================================
+                 右邊：眼睛疾病量表
+            ================================= -->
+
+            <a
+                href="/OSDI"
+                target="_self"
+                class="survey-choice right-choice"
+            >
+
+                <div class="survey-content">
+
+                    <div class="survey-title">
+                        眼睛疾病量表
+                    </div>
+
+                    <div class="survey-subtitle">
+                        點擊進入填寫
+                    </div>
+
+                </div>
+
+            </a>
+
         </div>
         """,
         unsafe_allow_html=True
     )
 
-    # =====================================================
-    # 因為 Streamlit button 才能執行 switch_page
-    # 使用兩欄做實際點擊區
-    # =====================================================
-
-    col_left, col_right = st.columns(2, gap=None)
-
-    with col_left:
-
-        st.markdown(
-            f"""
-            <div style="
-                height: 78vh;
-                margin-top: 11vh;
-
-                background: {left_background};
-                background-size: cover;
-                background-position: center;
-
-                border-radius: 0px;
-
-                display: flex;
-                align-items: center;
-                justify-content: center;
-
-                text-align: center;
-            ">
-
-                <div style="
-                    color: white;
-                    font-size: 34px;
-                    font-weight: 600;
-                    letter-spacing: 3px;
-                    text-shadow: 0px 2px 10px rgba(0,0,0,0.45);
-                ">
-                    中醫量質量表填寫
-                </div>
-
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
-
-        if st.button(
-            "進入中醫量質量表",
-            use_container_width=True,
-            key="ccmq_button"
-        ):
-            st.switch_page(ccmq_page)
-
-    with col_right:
-
-        st.markdown(
-            f"""
-            <div style="
-                height: 78vh;
-                margin-top: 11vh;
-
-                background: {right_background};
-                background-size: cover;
-                background-position: center;
-
-                border-radius: 0px;
-
-                display: flex;
-                align-items: center;
-                justify-content: center;
-
-                text-align: center;
-            ">
-
-                <div style="
-                    color: white;
-                    font-size: 34px;
-                    font-weight: 600;
-                    letter-spacing: 3px;
-                    text-shadow: 0px 2px 10px rgba(0,0,0,0.45);
-                ">
-                    眼睛疾病量表填寫
-                </div>
-
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
-
-        if st.button(
-            "進入眼睛疾病量表",
-            use_container_width=True,
-            key="osdi_button"
-        ):
-            st.switch_page(osdi_page)
-
 
 # =========================================================
-# 建立三個 Page
+# 建立 Page
 # =========================================================
 
 home_page = st.Page(
     home,
     title="AIDDES 問卷",
     icon="🏠",
-    default=True
+    default=True,
+    url_path=""
 )
+
 
 ccmq_page = st.Page(
     "CCMQ.py",
-    title="中醫量質量表"
+    title="中醫體質量表",
+    url_path="CCMQ"
 )
+
 
 osdi_page = st.Page(
     "OSDI.py",
-    title="眼睛疾病量表"
+    title="眼睛疾病量表",
+    url_path="OSDI"
 )
 
 
 # =========================================================
 # Navigation
-# position="hidden" = 不顯示左側導航
 # =========================================================
 
 navigation = st.navigation(
@@ -364,5 +532,6 @@ navigation = st.navigation(
     ],
     position="hidden"
 )
+
 
 navigation.run()
