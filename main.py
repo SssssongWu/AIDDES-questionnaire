@@ -38,8 +38,8 @@ def home():
     # -----------------------------------------------------
     # 之後只要修改這兩個圖片路徑
     # -----------------------------------------------------
-    left_image_path = "images/ccmq.jpg"
-    right_image_path = "images/osdi.jpg"
+    left_image_path = "image/CCMQ.jpg"
+    right_image_path = "image/OSDI.jpg"
 
     left_bg = get_base64_image(left_image_path)
     right_bg = get_base64_image(right_image_path)
