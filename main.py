@@ -1,7 +1,6 @@
 import streamlit as st
 import base64
 from pathlib import Path
-from textwrap import dedent
 
 
 # =========================================================
@@ -16,8 +15,7 @@ st.set_page_config(
 
 
 # =========================================================
-# 圖片轉 Base64 Data URI
-# 自動判斷 PNG / JPG / JPEG / WEBP
+# 圖片 → Base64
 # =========================================================
 def get_image_data_uri(image_path):
 
@@ -29,19 +27,19 @@ def get_image_data_uri(image_path):
 
     suffix = path.suffix.lower()
 
-    mime_map = {
+    mime_types = {
         ".png": "image/png",
         ".jpg": "image/jpeg",
         ".jpeg": "image/jpeg",
         ".webp": "image/webp"
     }
 
-    mime_type = mime_map.get(suffix, "image/png")
+    mime_type = mime_types.get(suffix, "image/png")
 
     with open(path, "rb") as f:
         encoded = base64.b64encode(f.read()).decode("utf-8")
 
-    print(f"✅ 圖片載入成功：{path.resolve()}")
+    print(f"✅ 圖片成功載入：{path.resolve()}")
 
     return f"data:{mime_type};base64,{encoded}"
 
@@ -51,16 +49,9 @@ def get_image_data_uri(image_path):
 # =========================================================
 def home():
 
-    # -----------------------------------------------------
+    # =====================================================
     # 圖片路徑
-    #
-    # GitHub：
-    #
-    # image/
-    # ├── CCMQ.png
-    # └── OSDI.png
-    #
-    # -----------------------------------------------------
+    # =====================================================
 
     left_image_path = "image/CCMQ.png"
     right_image_path = "image/OSDI.png"
@@ -69,54 +60,41 @@ def home():
     right_image = get_image_data_uri(right_image_path)
 
 
-    # -----------------------------------------------------
-    # 左邊背景
-    # -----------------------------------------------------
+    # =====================================================
+    # 背景
+    # =====================================================
 
     if left_image:
-
         left_background = (
             "linear-gradient("
-            "rgba(74, 64, 57, 0.20), "
-            "rgba(74, 64, 57, 0.20)"
+            "rgba(75, 65, 58, 0.16), "
+            "rgba(75, 65, 58, 0.16)"
             "), "
             f'url("{left_image}")'
         )
-
     else:
+        left_background = "#C8BBB0"
 
-        left_background = "#C7B9AE"
-
-
-    # -----------------------------------------------------
-    # 右邊背景
-    # -----------------------------------------------------
 
     if right_image:
-
         right_background = (
             "linear-gradient("
-            "rgba(74, 64, 57, 0.18), "
-            "rgba(74, 64, 57, 0.18)"
+            "rgba(75, 65, 58, 0.16), "
+            "rgba(75, 65, 58, 0.16)"
             "), "
             f'url("{right_image}")'
         )
-
     else:
-
-        right_background = "#BEB1A6"
+        right_background = "#C3B6AC"
 
 
     # =====================================================
-    # CSS
+    # HTML + CSS
+    # 使用 st.html，不再使用 st.markdown
     # =====================================================
 
-    css = f"""
+    page_html = f"""
 <style>
-
-/* ========================================================
-   清除 Streamlit 預設版面
-======================================================== */
 
 html,
 body {{
@@ -124,6 +102,9 @@ body {{
     padding: 0 !important;
     overflow: hidden !important;
 }}
+
+
+/* Streamlit 主畫面 */
 
 [data-testid="stAppViewContainer"] {{
     margin: 0 !important;
@@ -147,6 +128,9 @@ body {{
     max-width: 100% !important;
 }}
 
+
+/* 隱藏 Streamlit UI */
+
 header {{
     display: none !important;
 }}
@@ -160,11 +144,11 @@ footer {{
 }}
 
 
-/* ========================================================
-   首頁
-======================================================== */
+/* =====================================================
+   整個首頁
+===================================================== */
 
-.aid-home {{
+.aiddes-home {{
     position: relative;
 
     width: 100vw;
@@ -176,14 +160,16 @@ footer {{
     display: flex;
 
     overflow: hidden;
+
+    background: #EEEAE6;
 }}
 
 
-/* ========================================================
+/* =====================================================
    上方中央標題
-======================================================== */
+===================================================== */
 
-.aid-main-title {{
+.aiddes-main-title {{
     position: absolute;
 
     top: 6%;
@@ -191,16 +177,16 @@ footer {{
 
     transform: translateX(-50%);
 
-    z-index: 999;
+    z-index: 100;
 
-    background: rgba(190, 176, 164, 0.92);
+    background: rgba(196, 181, 169, 0.93);
 
-    color: #FFFFFF;
+    color: white;
 
     font-size: 30px;
     font-weight: 600;
 
-    letter-spacing: 4px;
+    letter-spacing: 5px;
 
     padding: 15px 42px;
 
@@ -209,21 +195,22 @@ footer {{
     white-space: nowrap;
 
     box-shadow:
-        0px 6px 20px rgba(60, 50, 45, 0.16);
+        0 6px 20px rgba(70, 60, 55, 0.16);
 }}
 
 
-/* ========================================================
-   左右整片按鈕
-======================================================== */
+/* =====================================================
+   左右大區塊
+===================================================== */
 
 .survey-choice {{
-    position: relative;
 
-    display: flex;
+    position: relative;
 
     width: 50%;
     height: 100vh;
+
+    display: flex;
 
     align-items: center;
     justify-content: center;
@@ -238,95 +225,55 @@ footer {{
     text-decoration: none !important;
 
     background-size: cover !important;
-    background-position: center !important;
+    background-position: center center !important;
     background-repeat: no-repeat !important;
 
     transition:
-        filter 0.35s ease,
-        transform 0.35s ease;
+        filter 0.35s ease;
 }}
 
 
-/* 左邊 */
+/* =====================================================
+   左圖
+===================================================== */
 
 .left-choice {{
-    background: {left_background};
+    background-image: {left_background};
 
     border-right:
-        1px solid rgba(255, 255, 255, 0.40);
+        1px solid rgba(255,255,255,0.40);
 }}
 
 
-/* 右邊 */
+/* =====================================================
+   右圖
+===================================================== */
 
 .right-choice {{
-    background: {right_background};
+    background-image: {right_background};
 }}
 
 
-/* ========================================================
-   Hover
-======================================================== */
+/* =====================================================
+   hover
+===================================================== */
 
 .survey-choice:hover {{
-    filter: brightness(1.08);
+    filter: brightness(1.07);
 }}
+
 
 .survey-choice:hover .survey-content {{
     transform: translateY(-6px);
 }}
 
 
-/* ========================================================
-   問卷文字
-======================================================== */
+/* =====================================================
+   圖片淡遮罩
+===================================================== */
 
-.survey-content {{
-    position: relative;
+.survey-choice::before {{
 
-    z-index: 20;
-
-    text-align: center;
-
-    color: white;
-
-    transition: transform 0.35s ease;
-}}
-
-
-.survey-title {{
-    color: white;
-
-    font-size: 36px;
-    font-weight: 600;
-
-    letter-spacing: 4px;
-
-    text-shadow:
-        0px 3px 14px rgba(0, 0, 0, 0.48);
-}}
-
-
-.survey-subtitle {{
-    margin-top: 14px;
-
-    color: rgba(255, 255, 255, 0.96);
-
-    font-size: 16px;
-    font-weight: 400;
-
-    letter-spacing: 2px;
-
-    text-shadow:
-        0px 2px 8px rgba(0, 0, 0, 0.38);
-}}
-
-
-/* ========================================================
-   圖片上淡淡遮罩
-======================================================== */
-
-.survey-choice::after {{
     content: "";
 
     position: absolute;
@@ -336,63 +283,82 @@ footer {{
     background:
         linear-gradient(
             to bottom,
-            rgba(50, 40, 35, 0.02),
-            rgba(50, 40, 35, 0.08)
+            rgba(60,50,45,0.01),
+            rgba(60,50,45,0.08)
         );
 
+    z-index: 1;
+
     pointer-events: none;
+}}
+
+
+/* =====================================================
+   中央文字
+===================================================== */
+
+.survey-content {{
+
+    position: relative;
 
     z-index: 5;
+
+    text-align: center;
+
+    transition:
+        transform 0.35s ease;
 }}
 
 
-/* ========================================================
-   中間 hover 微微放大感
-======================================================== */
+.survey-title {{
 
-.survey-choice::before {{
-    content: "";
+    color: white;
 
-    position: absolute;
+    font-size: 36px;
+    font-weight: 600;
 
-    inset: 0;
+    letter-spacing: 4px;
 
-    background: rgba(255,255,255,0);
-
-    z-index: 6;
-
-    transition: background 0.35s ease;
-
-    pointer-events: none;
-}}
-
-.survey-choice:hover::before {{
-    background: rgba(255,255,255,0.035);
+    text-shadow:
+        0 3px 14px rgba(0,0,0,0.48);
 }}
 
 
-/* ========================================================
+.survey-subtitle {{
+
+    margin-top: 15px;
+
+    color: rgba(255,255,255,0.95);
+
+    font-size: 16px;
+    font-weight: 400;
+
+    letter-spacing: 2px;
+
+    text-shadow:
+        0 2px 8px rgba(0,0,0,0.38);
+}}
+
+
+/* =====================================================
    手機
-======================================================== */
+===================================================== */
 
 @media (max-width: 768px) {{
 
-    html,
-    body {{
-        overflow: hidden !important;
-    }}
-
-    .aid-home {{
+    .aiddes-home {{
         flex-direction: column;
 
         width: 100vw;
         height: 100vh;
     }}
 
+
     .survey-choice {{
         width: 100%;
         height: 50vh;
     }}
+
 
     .left-choice {{
         border-right: none;
@@ -401,23 +367,25 @@ footer {{
             1px solid rgba(255,255,255,0.40);
     }}
 
-    .aid-main-title {{
+
+    .aiddes-main-title {{
+
         top: 3%;
 
         font-size: 21px;
 
-        padding: 11px 25px;
-
         letter-spacing: 3px;
+
+        padding: 11px 25px;
 
         border-radius: 14px;
     }}
 
+
     .survey-title {{
         font-size: 27px;
-
-        letter-spacing: 3px;
     }}
+
 
     .survey-subtitle {{
         font-size: 14px;
@@ -426,76 +394,62 @@ footer {{
 }}
 
 </style>
-"""
-
-    st.markdown(
-        dedent(css),
-        unsafe_allow_html=True
-    )
 
 
-    # =====================================================
-    # 首頁 HTML
-    #
-    # 注意：
-    # 這裡故意不做 Python 縮排
-    # 防止 Markdown 把 HTML 當 code block
-    # =====================================================
+<div class="aiddes-home">
 
-    html = """
-<div class="aid-home">
 
-<div class="aid-main-title">
-AIDDES 問卷填寫
-</div>
+    <div class="aiddes-main-title">
+        AIDDES 問卷填寫
+    </div>
 
-<a
-href="./CCMQ"
-target="_self"
-class="survey-choice left-choice"
->
 
-<div class="survey-content">
+    <a
+        class="survey-choice left-choice"
+        href="./CCMQ"
+        target="_self"
+    >
 
-<div class="survey-title">
-中醫體質量表
-</div>
+        <div class="survey-content">
 
-<div class="survey-subtitle">
-點擊進入填寫
-</div>
+            <div class="survey-title">
+                中醫體質量表
+            </div>
 
-</div>
+            <div class="survey-subtitle">
+                點擊進入填寫
+            </div>
 
-</a>
+        </div>
 
-<a
-href="./OSDI"
-target="_self"
-class="survey-choice right-choice"
->
+    </a>
 
-<div class="survey-content">
 
-<div class="survey-title">
-眼睛疾病量表
-</div>
+    <a
+        class="survey-choice right-choice"
+        href="./OSDI"
+        target="_self"
+    >
 
-<div class="survey-subtitle">
-點擊進入填寫
-</div>
+        <div class="survey-content">
 
-</div>
+            <div class="survey-title">
+                眼睛疾病量表
+            </div>
 
-</a>
+            <div class="survey-subtitle">
+                點擊進入填寫
+            </div>
+
+        </div>
+
+    </a>
+
 
 </div>
 """
 
-    st.markdown(
-        dedent(html),
-        unsafe_allow_html=True
-    )
+    st.html(page_html)
 
 
 # =========================================================
