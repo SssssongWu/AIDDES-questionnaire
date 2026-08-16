@@ -3,24 +3,42 @@ import pandas as pd
 import requests
 import base64
 import json
+
 from datetime import datetime
 from io import StringIO
 
 
 # =========================================================
 # GitHub 設定
+#
+# Streamlit Secrets：
+#
+# GITHUB_TOKEN = "你的 GitHub Token"
+# GITHUB_REPO = "ssssongwu/aiddes-questionnaire"
+#
 # =========================================================
+
 GITHUB_TOKEN = st.secrets["GITHUB_TOKEN"]
 GITHUB_REPO = st.secrets["GITHUB_REPO"]
 
 FILE_PATH = "ccmq_data.csv"
 
-URL = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{FILE_PATH}"
+GITHUB_URL = (
+    f"https://api.github.com/repos/"
+    f"{GITHUB_REPO}/contents/{FILE_PATH}"
+)
+
+GITHUB_HEADERS = {
+    "Authorization": f"Bearer {GITHUB_TOKEN}",
+    "Accept": "application/vnd.github+json",
+    "X-GitHub-Api-Version": "2022-11-28"
+}
 
 
 # =========================================================
 # 選項
 # =========================================================
+
 options_map = {
     "沒有": 1,
     "很少": 2,
@@ -38,7 +56,6 @@ questions = {
 
     # =====================================================
     # 平和質
-    # * 第 2、3、4、5、7、8 題逆向計分
     # =====================================================
     "平和質": [
         "您精力充沛嗎？",
@@ -163,14 +180,12 @@ questions = {
 # =========================================================
 # 平和質逆向題
 #
-# index 使用 0 開始
+# 第 2、3、4、5、7、8 題逆向
 #
-# PDF：
-# 2、3、4、5、7、8 題需要逆向
-#
-# 所以 Python index：
+# Python index：
 # 1、2、3、4、6、7
 # =========================================================
+
 reverse_questions = {
     "平和質": [1, 2, 3, 4, 6, 7]
 }
@@ -179,6 +194,7 @@ reverse_questions = {
 # =========================================================
 # 建立 CSV 欄位
 # =========================================================
+
 def create_columns():
 
     columns = [
@@ -189,27 +205,27 @@ def create_columns():
     # 每一題
     for constitution, qs in questions.items():
 
-        for i, q in enumerate(qs, start=1):
+        for i, _ in enumerate(qs, start=1):
 
             columns.append(
                 f"{constitution}_Q{i}"
             )
 
-    # 九種體質原始分
+    # 原始分
     for constitution in questions:
 
         columns.append(
             f"{constitution}_原始分"
         )
 
-    # 九種體質轉化分
+    # 轉化分
     for constitution in questions:
 
         columns.append(
             f"{constitution}_轉化分"
         )
 
-    # 九種體質判定
+    # 判定
     for constitution in questions:
 
         columns.append(
@@ -222,79 +238,494 @@ def create_columns():
 
 
 # =========================================================
-# 從 GitHub 讀取 CSV
+# 從 GitHub 讀取最新 CSV
+#
+# 回傳：
+# df
+# sha
+# error
 # =========================================================
-def get_github_data():
 
-    headers = {
-        "Authorization": f"token {GITHUB_TOKEN}",
-        "Accept": "application/vnd.github+json"
-    }
+def get_github_data():
 
     try:
 
         response = requests.get(
-            URL,
-            headers=headers,
+            GITHUB_URL,
+            headers=GITHUB_HEADERS,
             timeout=20
         )
 
+        print(
+            "GET GitHub status:",
+            response.status_code
+        )
+
+        # =================================================
+        # CSV 已存在
+        # =================================================
         if response.status_code == 200:
 
-            content = response.json()
+            data = response.json()
+
+            encoded_content = data.get(
+                "content",
+                ""
+            )
 
             csv_content = base64.b64decode(
-                content["content"]
-            ).decode("utf-8")
-
-            df = pd.read_csv(
-                StringIO(csv_content)
+                encoded_content
+            ).decode(
+                "utf-8"
             )
 
-            return df, content["sha"]
+            # CSV 有資料
+            if csv_content.strip():
+
+                try:
+
+                    df = pd.read_csv(
+                        StringIO(csv_content)
+                    )
+
+                except pd.errors.EmptyDataError:
+
+                    df = pd.DataFrame(
+                        columns=create_columns()
+                    )
+
+            # CSV 空檔案
+            else:
+
+                df = pd.DataFrame(
+                    columns=create_columns()
+                )
+
+            return (
+                df,
+                data.get("sha"),
+                None
+            )
 
 
+        # =================================================
+        # CSV 不存在
+        # 第一次使用
+        # =================================================
         elif response.status_code == 404:
 
+            df = pd.DataFrame(
+                columns=create_columns()
+            )
+
             return (
-                pd.DataFrame(
-                    columns=create_columns()
-                ),
+                df,
+                None,
                 None
             )
 
 
+        # =================================================
+        # GitHub API 錯誤
+        # =================================================
         else:
 
-            st.error(
-                f"讀取 CCMQ 資料失敗：HTTP {response.status_code}"
-            )
+            try:
+
+                error_detail = response.json()
+
+            except Exception:
+
+                error_detail = {
+                    "message": response.text
+                }
 
             return (
                 pd.DataFrame(
                     columns=create_columns()
                 ),
-                None
+                None,
+                {
+                    "status": response.status_code,
+                    "detail": error_detail
+                }
             )
 
 
-    except Exception as e:
-
-        st.error(
-            f"讀取資料時發生錯誤：{e}"
-        )
+    except requests.exceptions.Timeout:
 
         return (
             pd.DataFrame(
                 columns=create_columns()
             ),
-            None
+            None,
+            {
+                "status": "timeout",
+                "detail": "GitHub 連線逾時"
+            }
+        )
+
+
+    except requests.exceptions.RequestException as e:
+
+        return (
+            pd.DataFrame(
+                columns=create_columns()
+            ),
+            None,
+            {
+                "status": "request_error",
+                "detail": str(e)
+            }
+        )
+
+
+    except Exception as e:
+
+        return (
+            pd.DataFrame(
+                columns=create_columns()
+            ),
+            None,
+            {
+                "status": "unknown",
+                "detail": str(e)
+            }
+        )
+
+
+# =========================================================
+# 寫入 GitHub
+#
+# 重要：
+# 每次送出都重新抓最新 CSV + sha
+# 避免使用者開頁面太久後 sha 過期
+# =========================================================
+
+def save_to_github(current_data):
+
+    # -----------------------------------------------------
+    # 送出當下重新讀最新資料
+    # -----------------------------------------------------
+
+    latest_df, latest_sha, read_error = (
+        get_github_data()
+    )
+
+
+    if read_error is not None:
+
+        return (
+            False,
+            {
+                "stage": "read",
+                "error": read_error
+            }
+        )
+
+
+    # -----------------------------------------------------
+    # 確保欄位完整
+    # -----------------------------------------------------
+
+    expected_columns = create_columns()
+
+    for col in expected_columns:
+
+        if col not in latest_df.columns:
+
+            latest_df[col] = ""
+
+
+    # 依照固定欄位排序
+    latest_df = latest_df[
+        expected_columns
+    ]
+
+
+    # -----------------------------------------------------
+    # 新資料
+    # -----------------------------------------------------
+
+    new_row_df = pd.DataFrame(
+        [current_data]
+    )
+
+    updated_df = pd.concat(
+        [
+            latest_df,
+            new_row_df
+        ],
+        ignore_index=True
+    )
+
+
+    # -----------------------------------------------------
+    # CSV
+    #
+    # utf-8-sig：
+    # Excel 開啟中文比較不容易亂碼
+    # -----------------------------------------------------
+
+    csv_string = updated_df.to_csv(
+        index=False
+    )
+
+
+    encoded_csv = base64.b64encode(
+        csv_string.encode(
+            "utf-8-sig"
+        )
+    ).decode(
+        "utf-8"
+    )
+
+
+    # -----------------------------------------------------
+    # GitHub payload
+    # -----------------------------------------------------
+
+    payload = {
+        "message":
+            f"CCMQ questionnaire update - "
+            f"{current_data['姓名']}",
+
+        "content":
+            encoded_csv
+    }
+
+
+    # CSV 已存在才需要 sha
+    if latest_sha is not None:
+
+        payload["sha"] = latest_sha
+
+
+    # -----------------------------------------------------
+    # PUT
+    # -----------------------------------------------------
+
+    try:
+
+        response = requests.put(
+            GITHUB_URL,
+            headers=GITHUB_HEADERS,
+            json=payload,
+            timeout=20
+        )
+
+
+        print(
+            "PUT GitHub status:",
+            response.status_code
+        )
+
+        print(
+            "PUT GitHub response:",
+            response.text[:1000]
+        )
+
+
+        # 200 = 更新
+        # 201 = 新建
+        if response.status_code in [
+            200,
+            201
+        ]:
+
+            return (
+                True,
+                response.json()
+            )
+
+
+        # -------------------------------------------------
+        # 如果剛好有人同時寫入造成 sha conflict
+        # 再嘗試一次
+        # -------------------------------------------------
+
+        if response.status_code == 409:
+
+            retry_df, retry_sha, retry_error = (
+                get_github_data()
+            )
+
+            if retry_error is not None:
+
+                return (
+                    False,
+                    {
+                        "stage": "retry_read",
+                        "error": retry_error
+                    }
+                )
+
+
+            for col in expected_columns:
+
+                if col not in retry_df.columns:
+
+                    retry_df[col] = ""
+
+
+            retry_df = retry_df[
+                expected_columns
+            ]
+
+
+            retry_updated_df = pd.concat(
+                [
+                    retry_df,
+                    pd.DataFrame(
+                        [current_data]
+                    )
+                ],
+                ignore_index=True
+            )
+
+
+            retry_csv = retry_updated_df.to_csv(
+                index=False
+            )
+
+
+            retry_payload = {
+                "message":
+                    f"CCMQ questionnaire update - "
+                    f"{current_data['姓名']}",
+
+                "content":
+                    base64.b64encode(
+                        retry_csv.encode(
+                            "utf-8-sig"
+                        )
+                    ).decode(
+                        "utf-8"
+                    )
+            }
+
+
+            if retry_sha is not None:
+
+                retry_payload["sha"] = (
+                    retry_sha
+                )
+
+
+            retry_response = requests.put(
+                GITHUB_URL,
+                headers=GITHUB_HEADERS,
+                json=retry_payload,
+                timeout=20
+            )
+
+
+            if retry_response.status_code in [
+                200,
+                201
+            ]:
+
+                return (
+                    True,
+                    retry_response.json()
+                )
+
+
+            try:
+
+                retry_detail = (
+                    retry_response.json()
+                )
+
+            except Exception:
+
+                retry_detail = {
+                    "message":
+                        retry_response.text
+                }
+
+
+            return (
+                False,
+                {
+                    "stage": "retry_write",
+                    "status":
+                        retry_response.status_code,
+                    "detail":
+                        retry_detail
+                }
+            )
+
+
+        # -------------------------------------------------
+        # 其他錯誤
+        # -------------------------------------------------
+
+        try:
+
+            error_detail = response.json()
+
+        except Exception:
+
+            error_detail = {
+                "message":
+                    response.text
+            }
+
+
+        return (
+            False,
+            {
+                "stage": "write",
+                "status":
+                    response.status_code,
+                "detail":
+                    error_detail
+            }
+        )
+
+
+    except requests.exceptions.Timeout:
+
+        return (
+            False,
+            {
+                "stage": "write",
+                "status": "timeout",
+                "detail":
+                    "連線 GitHub 逾時"
+            }
+        )
+
+
+    except requests.exceptions.RequestException as e:
+
+        return (
+            False,
+            {
+                "stage": "write",
+                "status": "request_error",
+                "detail": str(e)
+            }
+        )
+
+
+    except Exception as e:
+
+        return (
+            False,
+            {
+                "stage": "write",
+                "status": "unknown",
+                "detail": str(e)
+            }
         )
 
 
 # =========================================================
 # 計算某一體質分數
 # =========================================================
+
 def calculate_constitution_score(
     constitution,
     scores
@@ -302,8 +733,9 @@ def calculate_constitution_score(
 
     corrected_scores = scores.copy()
 
-    # -----------------------------------------------------
-    # 平和質逆向計分
+
+    # =====================================================
+    # 逆向題
     #
     # 1 → 5
     # 2 → 4
@@ -311,8 +743,9 @@ def calculate_constitution_score(
     # 4 → 2
     # 5 → 1
     #
-    # 可寫成 6 - score
-    # -----------------------------------------------------
+    # 公式：6 - score
+    # =====================================================
+
     if constitution in reverse_questions:
 
         for index in reverse_questions[
@@ -323,29 +756,39 @@ def calculate_constitution_score(
                 6 - corrected_scores[index]
             )
 
-    # -----------------------------------------------------
+
+    # =====================================================
     # 原始分
-    # -----------------------------------------------------
-    raw_score = sum(corrected_scores)
+    # =====================================================
 
-    n = len(corrected_scores)
+    raw_score = sum(
+        corrected_scores
+    )
 
-    # -----------------------------------------------------
+    n = len(
+        corrected_scores
+    )
+
+
+    # =====================================================
     # 轉化分
     #
     # [(原始分 - 條目數)
     # / (條目數 × 4)] × 100
-    # -----------------------------------------------------
+    # =====================================================
+
     transformed_score = (
         (raw_score - n)
         /
         (n * 4)
     ) * 100
 
+
     transformed_score = round(
         transformed_score,
         2
     )
+
 
     return (
         raw_score,
@@ -356,50 +799,79 @@ def calculate_constitution_score(
 # =========================================================
 # 判定九種體質
 # =========================================================
+
 def determine_constitution(
     transformed_scores
 ):
 
     results = {}
 
-    # -----------------------------------------------------
-    # 先判定其他八種偏頗體質
-    # -----------------------------------------------------
-    for constitution, score in transformed_scores.items():
+
+    # =====================================================
+    # 八種偏頗體質
+    # =====================================================
+
+    for (
+        constitution,
+        score
+    ) in transformed_scores.items():
 
         if constitution == "平和質":
+
             continue
+
 
         if score >= 40:
 
-            results[constitution] = "是"
+            results[
+                constitution
+            ] = "是"
+
 
         elif score >= 30:
 
-            results[constitution] = "傾向是"
+            results[
+                constitution
+            ] = "傾向是"
+
 
         else:
 
-            results[constitution] = "否"
+            results[
+                constitution
+            ] = "否"
 
 
-    # -----------------------------------------------------
+    # =====================================================
     # 平和質
-    # -----------------------------------------------------
-    pinghe_score = transformed_scores[
-        "平和質"
-    ]
+    # =====================================================
+
+    pinghe_score = (
+        transformed_scores[
+            "平和質"
+        ]
+    )
+
 
     other_scores = [
+
         score
-        for constitution, score
-        in transformed_scores.items()
+
+        for (
+            constitution,
+            score
+        ) in transformed_scores.items()
+
         if constitution != "平和質"
     ]
 
 
-    # 平和質 >= 60
-    # 且其他 8 種全部 < 30
+    # -----------------------------------------------------
+    # 是
+    # 平和 >= 60
+    # 其他全部 < 30
+    # -----------------------------------------------------
+
     if (
         pinghe_score >= 60
         and
@@ -412,8 +884,12 @@ def determine_constitution(
         results["平和質"] = "是"
 
 
-    # 平和質 >= 60
-    # 且其他 8 種全部 < 40
+    # -----------------------------------------------------
+    # 基本是
+    # 平和 >= 60
+    # 其他全部 < 40
+    # -----------------------------------------------------
+
     elif (
         pinghe_score >= 60
         and
@@ -423,12 +899,16 @@ def determine_constitution(
         )
     ):
 
-        results["平和質"] = "基本是"
+        results[
+            "平和質"
+        ] = "基本是"
 
 
     else:
 
-        results["平和質"] = "否"
+        results[
+            "平和質"
+        ] = "否"
 
 
     return results
@@ -437,9 +917,14 @@ def determine_constitution(
 # =========================================================
 # CSS
 # =========================================================
+
 st.markdown(
     """
     <style>
+
+    /* ================================================
+       主內容
+    ================================================ */
 
     .block-container {
         max-width: 1000px;
@@ -447,43 +932,114 @@ st.markdown(
         padding-bottom: 5rem;
     }
 
+
+    /* ================================================
+       返回首頁
+    ================================================ */
+
+    .back-home {
+        display: inline-block;
+
+        margin-bottom: 18px;
+
+        padding: 8px 16px;
+
+        background-color: #EDE7E1;
+
+        color: #6F6259 !important;
+
+        text-decoration: none !important;
+
+        border-radius: 10px;
+
+        font-size: 14px;
+
+        font-weight: 600;
+    }
+
+
+    .back-home:hover {
+        background-color: #DDD3CA;
+    }
+
+
+    /* ================================================
+       標題
+    ================================================ */
+
     .ccmq-title {
         text-align: center;
+
         font-size: 34px;
+
         font-weight: 700;
+
         color: #6F6259;
+
         margin-bottom: 8px;
     }
 
+
     .ccmq-subtitle {
         text-align: center;
+
         color: #8A817A;
+
         font-size: 15px;
+
         margin-bottom: 30px;
     }
 
+
+    /* ================================================
+       體質標題
+    ================================================ */
+
     .constitution-title {
+
         font-size: 23px;
+
         font-weight: 700;
+
         color: #6F6259;
 
         margin-top: 36px;
+
         margin-bottom: 8px;
 
         padding-bottom: 8px;
 
-        border-bottom: 2px solid #DDD4CC;
+        border-bottom:
+            2px solid #DDD4CC;
     }
 
+
     .constitution-caption {
+
         color: #8D8782;
+
         font-size: 14px;
+
         margin-bottom: 18px;
     }
 
+
+    /* ================================================
+       Radio
+    ================================================ */
+
+    div[role="radiogroup"] {
+        margin-bottom: 12px;
+    }
+
+
+    /* ================================================
+       Submit
+    ================================================ */
+
     div[data-testid="stFormSubmitButton"] button {
 
-        background-color: #75665B;
+        background-color: #A99687;
 
         color: white;
 
@@ -496,16 +1052,24 @@ st.markdown(
         font-size: 17px;
 
         font-weight: 600;
+
+        margin-top: 20px;
     }
+
 
     div[data-testid="stFormSubmitButton"] button:hover {
 
-        background-color: #62564D;
+        background-color: #8F7D70;
 
         color: white;
 
         border: none;
     }
+
+
+    /* ================================================
+       結果
+    ================================================ */
 
     .result-box {
 
@@ -520,7 +1084,50 @@ st.markdown(
         margin-bottom: 12px;
     }
 
+
+    /* ================================================
+       手機
+    ================================================ */
+
+    @media (max-width: 768px) {
+
+        .block-container {
+            padding-left: 1rem;
+            padding-right: 1rem;
+        }
+
+        .ccmq-title {
+            font-size: 27px;
+        }
+
+        .constitution-title {
+            font-size: 20px;
+        }
+    }
+
     </style>
+    """,
+    unsafe_allow_html=True
+)
+
+
+# =========================================================
+# 返回首頁
+#
+# 不使用：
+# st.switch_page("main.py")
+#
+# =========================================================
+
+st.markdown(
+    """
+    <a
+        class="back-home"
+        href="/"
+        target="_self"
+    >
+        ← 返回首頁
+    </a>
     """,
     unsafe_allow_html=True
 )
@@ -529,6 +1136,7 @@ st.markdown(
 # =========================================================
 # 頁面標題
 # =========================================================
+
 st.markdown(
     """
     <div class="ccmq-title">
@@ -544,22 +1152,22 @@ st.markdown(
 
 
 # =========================================================
-# 讀取 CSV
-# =========================================================
-df, file_sha = get_github_data()
-
-
-# =========================================================
 # 問卷
 # =========================================================
+
 with st.form(
     "ccmq_survey_form"
 ):
 
-    # -----------------------------------------------------
+
+    # =====================================================
     # 基本資料
-    # -----------------------------------------------------
-    col1, col2 = st.columns(2)
+    # =====================================================
+
+    col1, col2 = st.columns(
+        2
+    )
+
 
     with col1:
 
@@ -567,6 +1175,7 @@ with st.form(
             "姓名",
             placeholder="請輸入姓名"
         )
+
 
     with col2:
 
@@ -579,13 +1188,19 @@ with st.form(
     # =====================================================
     # 儲存回答
     # =====================================================
+
     responses = {}
 
 
     # =====================================================
     # 九種體質
     # =====================================================
-    for constitution, qs in questions.items():
+
+    for (
+        constitution,
+        qs
+    ) in questions.items():
+
 
         st.markdown(
             f"""
@@ -596,7 +1211,11 @@ with st.form(
             unsafe_allow_html=True
         )
 
+
+        # -------------------------------------------------
         # 平和質提醒
+        # -------------------------------------------------
+
         if constitution == "平和質":
 
             st.markdown(
@@ -608,6 +1227,11 @@ with st.form(
                 unsafe_allow_html=True
             )
 
+
+        # -------------------------------------------------
+        # 題目
+        # -------------------------------------------------
+
         for i, q in enumerate(
             qs,
             start=1
@@ -617,7 +1241,10 @@ with st.form(
                 f"{constitution}_Q{i}"
             )
 
-            responses[key] = st.radio(
+
+            responses[
+                key
+            ] = st.radio(
 
                 f"{i}. {q}",
 
@@ -636,29 +1263,48 @@ with st.form(
     # =====================================================
     # Submit
     # =====================================================
-    submitted = st.form_submit_button(
-        "確認送出",
-        use_container_width=True
+
+    submitted = (
+        st.form_submit_button(
+            "確認送出",
+            use_container_width=True
+        )
     )
 
 
 # =========================================================
 # 送出處理
 # =========================================================
+
 if submitted:
 
-    # -----------------------------------------------------
-    # 姓名檢查
-    # -----------------------------------------------------
+
+    # =====================================================
+    # 姓名
+    # =====================================================
+
     if not name.strip():
 
         st.error(
-            "請輸入姓名"
+            "請輸入姓名。"
         )
 
-    # -----------------------------------------------------
-    # 是否全部完成
-    # -----------------------------------------------------
+
+    # =====================================================
+    # 手機號碼
+    # =====================================================
+
+    elif not phone.strip():
+
+        st.error(
+            "請輸入手機號碼。"
+        )
+
+
+    # =====================================================
+    # 檢查有沒有漏答
+    # =====================================================
+
     elif any(
         answer is None
         for answer in responses.values()
@@ -669,32 +1315,51 @@ if submitted:
             for answer in responses.values()
         )
 
+
         st.error(
-            f"尚有 {unanswered} 題未填寫，請完成所有題目後再送出。"
+            f"尚有 {unanswered} 題未填寫，"
+            f"請完成所有題目後再送出。"
         )
+
+
+    # =====================================================
+    # 全部完成
+    # =====================================================
 
     else:
 
+
         # =================================================
-        # 建立這一筆資料
+        # 建立單筆資料
         # =================================================
+
         current_data = {
-            "姓名": name.strip(),
-            "手機號碼": phone.strip()
+
+            "姓名":
+                name.strip(),
+
+            "手機號碼":
+                phone.strip()
         }
 
 
         # =================================================
-        # 各體質 raw responses
+        # 每一體質回答
         # =================================================
+
         raw_scores_by_constitution = {}
 
 
-        for constitution, qs in questions.items():
+        for (
+            constitution,
+            qs
+        ) in questions.items():
+
 
             constitution_scores = []
 
-            for i, q in enumerate(
+
+            for i, _ in enumerate(
                 qs,
                 start=1
             ):
@@ -703,16 +1368,30 @@ if submitted:
                     f"{constitution}_Q{i}"
                 )
 
-                answer_text = responses[
+
+                answer_text = (
+                    responses[
+                        key
+                    ]
+                )
+
+
+                score = (
+                    options_map[
+                        answer_text
+                    ]
+                )
+
+
+                # -----------------------------------------
+                # CSV 儲存使用者原始回答
+                # 1 ~ 5
+                # -----------------------------------------
+
+                current_data[
                     key
-                ]
+                ] = score
 
-                score = options_map[
-                    answer_text
-                ]
-
-                # CSV 儲存原本填寫分數
-                current_data[key] = score
 
                 constitution_scores.append(
                     score
@@ -725,8 +1404,9 @@ if submitted:
 
 
         # =================================================
-        # 計算九種體質
+        # 計算體質
         # =================================================
+
         raw_total_scores = {}
 
         transformed_scores = {}
@@ -735,18 +1415,26 @@ if submitted:
         for (
             constitution,
             constitution_scores
-        ) in raw_scores_by_constitution.items():
+        ) in (
+            raw_scores_by_constitution.items()
+        ):
 
-            raw_score, transformed_score = (
+
+            (
+                raw_score,
+                transformed_score
+            ) = (
                 calculate_constitution_score(
                     constitution,
                     constitution_scores
                 )
             )
 
+
             raw_total_scores[
                 constitution
             ] = raw_score
+
 
             transformed_scores[
                 constitution
@@ -756,6 +1444,7 @@ if submitted:
         # =================================================
         # 判定
         # =================================================
+
         constitution_results = (
             determine_constitution(
                 transformed_scores
@@ -764,28 +1453,42 @@ if submitted:
 
 
         # =================================================
-        # 存入 CSV
+        # 存入資料
         # =================================================
+
         for constitution in questions:
+
 
             current_data[
                 f"{constitution}_原始分"
-            ] = raw_total_scores[
-                constitution
-            ]
+            ] = (
+                raw_total_scores[
+                    constitution
+                ]
+            )
+
 
             current_data[
                 f"{constitution}_轉化分"
-            ] = transformed_scores[
-                constitution
-            ]
+            ] = (
+                transformed_scores[
+                    constitution
+                ]
+            )
+
 
             current_data[
                 f"{constitution}_判定"
-            ] = constitution_results[
-                constitution
-            ]
+            ] = (
+                constitution_results[
+                    constitution
+                ]
+            )
 
+
+        # =================================================
+        # 時間
+        # =================================================
 
         current_data[
             "填寫時間"
@@ -795,136 +1498,158 @@ if submitted:
 
 
         # =================================================
-        # 加入 DataFrame
+        # 寫入 GitHub
         # =================================================
-        updated_df = pd.concat(
-            [
-                df,
-                pd.DataFrame(
-                    [current_data]
+
+        with st.spinner(
+            "正在儲存問卷資料..."
+        ):
+
+
+            success, result = (
+                save_to_github(
+                    current_data
                 )
-            ],
-            ignore_index=True
-        )
-
-
-        csv_string = updated_df.to_csv(
-            index=False
-        )
-
-
-        # =================================================
-        # GitHub headers
-        # =================================================
-        headers = {
-
-            "Authorization":
-                f"token {GITHUB_TOKEN}",
-
-            "Accept":
-                "application/vnd.github+json"
-        }
-
-
-        # =================================================
-        # GitHub payload
-        # =================================================
-        payload = {
-
-            "message":
-                f"CCMQ Update: {name}",
-
-            "content":
-                base64.b64encode(
-                    csv_string.encode(
-                        "utf-8"
-                    )
-                ).decode(
-                    "utf-8"
-                )
-        }
-
-
-        if file_sha:
-
-            payload["sha"] = file_sha
-
-
-        # =================================================
-        # Upload
-        # =================================================
-        try:
-        
-            res = requests.put(
-                URL,
-                headers=headers,
-                json=payload,
-                timeout=20
             )
-        
-            # 除錯資訊
-            print("GitHub URL:", URL)
-            print("GitHub status:", res.status_code)
-            print("GitHub response:", res.text)
-        
-            if res.status_code in [200, 201]:
-        
-                st.success("中醫體質問卷送出成功！")
-        
-                # =========================================
-                # 顯示結果
-                # =========================================
-                st.markdown("### 體質評估結果")
-        
-                for constitution in questions:
-        
-                    score = transformed_scores[constitution]
-                    result = constitution_results[constitution]
-        
-                    st.markdown(
-                        f"""
-                        <div class="result-box">
-                            <b>{constitution}</b><br>
-                            轉化分：{score}<br>
-                            判定：<b>{result}</b>
-                        </div>
-                        """,
-                        unsafe_allow_html=True
+
+
+        # =================================================
+        # 成功
+        # =================================================
+
+        if success:
+
+
+            st.success(
+                "中醫體質問卷送出成功！"
+            )
+
+
+            st.markdown(
+                "### 體質評估結果"
+            )
+
+
+            for constitution in questions:
+
+
+                score = (
+                    transformed_scores[
+                        constitution
+                    ]
+                )
+
+
+                result_text = (
+                    constitution_results[
+                        constitution
+                    ]
+                )
+
+
+                st.markdown(
+                    f"""
+                    <div class="result-box">
+
+                        <b>
+                            {constitution}
+                        </b>
+
+                        <br>
+
+                        轉化分：
+                        {score}
+
+                        <br>
+
+                        判定：
+                        <b>
+                            {result_text}
+                        </b>
+
+                    </div>
+                    """,
+                    unsafe_allow_html=True
+                )
+
+
+        # =================================================
+        # 失敗
+        # =================================================
+
+        else:
+
+
+            st.error(
+                "問卷已完成，但資料沒有成功寫入 GitHub。"
+            )
+
+
+            # ---------------------------------------------
+            # 顯示詳細原因
+            # 方便現在除錯
+            # ---------------------------------------------
+
+            if isinstance(
+                result,
+                dict
+            ):
+
+                stage = result.get(
+                    "stage",
+                    ""
+                )
+
+                status = result.get(
+                    "status",
+                    ""
+                )
+
+                detail = result.get(
+                    "detail",
+                    result.get(
+                        "error",
+                        ""
                     )
-        
+                )
+
+
+                if stage:
+
+                    st.write(
+                        f"錯誤階段：{stage}"
+                    )
+
+
+                if status:
+
+                    st.write(
+                        f"HTTP 狀態：{status}"
+                    )
+
+
+                if detail:
+
+                    if isinstance(
+                        detail,
+                        (
+                            dict,
+                            list
+                        )
+                    ):
+
+                        st.json(
+                            detail
+                        )
+
+                    else:
+
+                        st.code(
+                            str(detail)
+                        )
+
             else:
-        
-                st.error(
-                    f"GitHub 儲存失敗，HTTP {res.status_code}"
+
+                st.code(
+                    str(result)
                 )
-        
-                try:
-        
-                    error_data = res.json()
-        
-                    st.json(error_data)
-        
-                except Exception:
-        
-                    st.code(res.text)
-        
-        
-        except requests.exceptions.Timeout:
-        
-            st.error(
-                "連線 GitHub 逾時，請稍後再試。"
-            )
-        
-        
-        except requests.exceptions.RequestException as e:
-        
-            st.error(
-                f"GitHub 連線錯誤：{e}"
-            )
-
-
-except Exception as e:
-
-    st.error(
-        f"儲存資料時發生錯誤：{e}"
-    )
