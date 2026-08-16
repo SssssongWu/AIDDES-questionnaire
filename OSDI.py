@@ -981,34 +981,64 @@ st.markdown(
        結果
     ================================================ */
 
-    .osdi-result {
-
-        margin-top: 22px;
-
-        padding: 22px 24px;
-
-        border-radius: 16px;
-
-        background-color: #F3EFEA;
-
+     .osdi-result {
+        margin-top: 24px;
+        padding: 30px 32px;
+    
+        background-color: #F5F0EB;
+    
+        border-radius: 18px;
+    
+        text-align: center;
+    
         color: #6F6259;
-
-        line-height: 1.8;
-
-        font-size: 16px;
     }
-
-
+    
+    .result-label {
+        font-size: 15px;
+        color: #8A817A;
+        letter-spacing: 1px;
+    }
+    
     .osdi-score {
-
-        font-size: 24px;
-
+        font-size: 42px;
         font-weight: 700;
-
-        color: #6F6259;
+    
+        color: #806F62;
+    
+        margin-top: 4px;
+        margin-bottom: 20px;
     }
-
-
+    
+    .result-status-label {
+        margin-top: 8px;
+    }
+    
+    .result-status {
+        display: inline-block;
+    
+        margin-top: 8px;
+    
+        padding: 8px 22px;
+    
+        background-color: #B5A293;
+        color: white;
+    
+        border-radius: 20px;
+    
+        font-size: 18px;
+        font-weight: 600;
+    }
+    
+    .result-note {
+        margin-top: 22px;
+    
+        color: #9A918A;
+    
+        font-size: 13px;
+    
+        line-height: 1.7;
+    }
     /* ================================================
        手機
     ================================================ */
@@ -1156,7 +1186,7 @@ with st.form(
                 ),
 
                 # 預設「未作答」
-                index=5,
+                index=None,
 
                 horizontal=True,
 
@@ -1395,36 +1425,31 @@ if submitted:
                 )
 
 
-            # =============================================
-            # 成功
-            # =============================================
-
             if success:
-
-                st.success(
-                    "眼睛疾病問卷送出成功！"
-                )
-
-
+            
+                st.success("眼睛疾病問卷送出成功！")
+            
                 st.markdown(
                     f"""
-                    <div class="osdi-result">
-
-                        OSDI 分數
-
-                        <div class="osdi-score">
-                            {osdi_score}
-                        </div>
-
-                        評估結果：
-                        <b>{status}</b>
-
-                    </div>
+            <div class="osdi-result">
+                <div class="result-label">OSDI 分數</div>
+                <div class="osdi-score">{osdi_score}</div>
+            
+                <div class="result-label result-status-label">
+                    評估結果
+                </div>
+            
+                <div class="result-status">
+                    {status}
+                </div>
+            
+                <div class="result-note">
+                    此結果僅供問卷評估參考，實際狀況仍需由專業醫療人員判斷。
+                </div>
+            </div>
                     """,
                     unsafe_allow_html=True
                 )
-
-
             # =============================================
             # 失敗
             # =============================================
