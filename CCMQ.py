@@ -854,88 +854,77 @@ if submitted:
         # Upload
         # =================================================
         try:
-
+        
             res = requests.put(
                 URL,
                 headers=headers,
                 json=payload,
                 timeout=20
             )
-
-
-            if res.status_code in [
-                200,
-                201
-            ]:
-
-                st.success(
-                    "中醫體質問卷送出成功！"
-                )
-
-
+        
+            # 除錯資訊
+            print("GitHub URL:", URL)
+            print("GitHub status:", res.status_code)
+            print("GitHub response:", res.text)
+        
+            if res.status_code in [200, 201]:
+        
+                st.success("中醫體質問卷送出成功！")
+        
                 # =========================================
                 # 顯示結果
                 # =========================================
-                st.markdown(
-                    "### 體質評估結果"
-                )
-
-
+                st.markdown("### 體質評估結果")
+        
                 for constitution in questions:
-
-                    score = transformed_scores[
-                        constitution
-                    ]
-
-                    result = constitution_results[
-                        constitution
-                    ]
-
+        
+                    score = transformed_scores[constitution]
+                    result = constitution_results[constitution]
+        
                     st.markdown(
                         f"""
                         <div class="result-box">
-
-                        <b>{constitution}</b><br>
-
-                        轉化分：
-                        {score}<br>
-
-                        判定：
-                        <b>{result}</b>
-
+                            <b>{constitution}</b><br>
+                            轉化分：{score}<br>
+                            判定：<b>{result}</b>
                         </div>
                         """,
                         unsafe_allow_html=True
                     )
-
-
+        
             else:
-
+        
                 st.error(
-                    f"儲存失敗：HTTP {res.status_code}"
+                    f"GitHub 儲存失敗，HTTP {res.status_code}"
                 )
-
+        
                 try:
-
+        
                     error_data = res.json()
-
-                    st.code(
-                        json.dumps(
-                            error_data,
-                            ensure_ascii=False,
-                            indent=2
-                        )
-                    )
-
+        
+                    st.json(error_data)
+        
                 except Exception:
-
-                    st.code(
-                        res.text
-                    )
-
-
-        except Exception as e:
-
+        
+                    st.code(res.text)
+        
+        
+        except requests.exceptions.Timeout:
+        
             st.error(
-                f"儲存資料時發生錯誤：{e}"
+                "連線 GitHub 逾時，請稍後再試。"
             )
+        
+        
+        except requests.exceptions.RequestException as e:
+        
+            st.error(
+                f"GitHub 連線錯誤：{e}"
+            )
+
+
+except Exception as e:
+
+    st.error(
+        f"儲存資料時發生錯誤：{e}"
+    )
