@@ -9,18 +9,13 @@ from io import StringIO
 
 # =========================================================
 # GitHub 設定
-#
-# Streamlit Secrets：
-#
-# GITHUB_TOKEN = "你的 GitHub Token"
-# GITHUB_REPO = "ssssongwu/aiddes-questionnaire"
-#
 # =========================================================
 
 GITHUB_TOKEN = st.secrets["GITHUB_TOKEN"]
 GITHUB_REPO = st.secrets["GITHUB_REPO"]
 
 FILE_PATH = "osdi_data.csv"
+BRANCH = "main"
 
 GITHUB_URL = (
     f"https://api.github.com/repos/"
@@ -46,7 +41,6 @@ cat_a = [
     "視力減退"
 ]
 
-
 cat_b = [
     "閱讀",
     "夜間駕駛",
@@ -54,23 +48,17 @@ cat_b = [
     "觀看電視"
 ]
 
-
 cat_c = [
     "刮風的狀況",
     "所在的地點或區域的濕度較低（非常乾燥）",
     "所在的區域使用空調"
 ]
 
-
-all_questions = (
-    cat_a
-    + cat_b
-    + cat_c
-)
+all_questions = cat_a + cat_b + cat_c
 
 
 # =========================================================
-# 選項分數
+# 選項
 # =========================================================
 
 options_map = {
@@ -104,12 +92,25 @@ def create_columns():
 
 
 # =========================================================
-# 從 GitHub 讀取最新 CSV
+# 回答 → 分數
 #
-# 回傳：
-# df
-# sha
-# error
+# 如果 radio 沒選，
+# 直接視為「未作答」
+# =========================================================
+
+def answer_to_score(answer):
+
+    if answer is None:
+        return -1
+
+    return options_map.get(
+        answer,
+        -1
+    )
+
+
+# =========================================================
+# 讀取 GitHub CSV
 # =========================================================
 
 def get_github_data():
@@ -119,17 +120,20 @@ def get_github_data():
         response = requests.get(
             GITHUB_URL,
             headers=GITHUB_HEADERS,
+            params={
+                "ref": BRANCH
+            },
             timeout=20
         )
 
         print(
-            "OSDI GET GitHub status:",
+            "OSDI GET status:",
             response.status_code
         )
 
 
         # =================================================
-        # CSV 已存在
+        # 已存在
         # =================================================
 
         if response.status_code == 200:
@@ -141,14 +145,10 @@ def get_github_data():
                 ""
             )
 
-
-            # GitHub 回傳 Base64
             csv_bytes = base64.b64decode(
                 encoded_content
             )
 
-
-            # utf-8-sig 可以同時處理 BOM
             csv_content = csv_bytes.decode(
                 "utf-8-sig"
             )
@@ -175,6 +175,19 @@ def get_github_data():
                 )
 
 
+            # 補齊欄位
+            expected_columns = create_columns()
+
+            for col in expected_columns:
+
+                if col not in df.columns:
+                    df[col] = ""
+
+            df = df[
+                expected_columns
+            ]
+
+
             return (
                 df,
                 data.get("sha"),
@@ -183,9 +196,7 @@ def get_github_data():
 
 
         # =================================================
-        # CSV 尚未存在
-        #
-        # 第一次填寫時會走這裡
+        # 第一次使用
         # =================================================
 
         elif response.status_code == 404:
@@ -206,17 +217,10 @@ def get_github_data():
         else:
 
             try:
-
-                error_detail = (
-                    response.json()
-                )
+                detail = response.json()
 
             except Exception:
-
-                error_detail = {
-                    "message":
-                        response.text
-                }
+                detail = response.text
 
 
             return (
@@ -225,18 +229,11 @@ def get_github_data():
                 ),
                 None,
                 {
-                    "status":
-                        response.status_code,
-
-                    "detail":
-                        error_detail
+                    "status": response.status_code,
+                    "detail": detail
                 }
             )
 
-
-    # =====================================================
-    # Timeout
-    # =====================================================
 
     except requests.exceptions.Timeout:
 
@@ -247,36 +244,10 @@ def get_github_data():
             None,
             {
                 "status": "timeout",
-                "detail":
-                    "GitHub 連線逾時"
+                "detail": "連線 GitHub 逾時"
             }
         )
 
-
-    # =====================================================
-    # Request error
-    # =====================================================
-
-    except requests.exceptions.RequestException as e:
-
-        return (
-            pd.DataFrame(
-                columns=create_columns()
-            ),
-            None,
-            {
-                "status":
-                    "request_error",
-
-                "detail":
-                    str(e)
-            }
-        )
-
-
-    # =====================================================
-    # 其他
-    # =====================================================
 
     except Exception as e:
 
@@ -286,34 +257,21 @@ def get_github_data():
             ),
             None,
             {
-                "status":
-                    "unknown",
-
-                "detail":
-                    str(e)
+                "status": "error",
+                "detail": str(e)
             }
         )
 
 
 # =========================================================
 # 寫入 GitHub
-#
-# 重要：
-# 每次按送出時，
-# 都重新抓最新 CSV 和最新 sha。
-#
-# 避免：
-# 兩個人同時填問卷時，
-# 使用舊 sha 導致寫入失敗。
 # =========================================================
 
-def save_to_github(
-    current_data
-):
+def save_to_github(current_data):
 
-    # =====================================================
-    # 重新取得最新版 CSV
-    # =====================================================
+    # -----------------------------------------------------
+    # 每次送出重新讀最新版
+    # -----------------------------------------------------
 
     latest_df, latest_sha, read_error = (
         get_github_data()
@@ -326,67 +284,44 @@ def save_to_github(
             False,
             {
                 "stage": "read",
-                "error": read_error
+                **read_error
             }
         )
 
 
-    # =====================================================
-    # 確保欄位一致
-    # =====================================================
-
-    expected_columns = (
-        create_columns()
-    )
+    expected_columns = create_columns()
 
 
-    for col in expected_columns:
+    # -----------------------------------------------------
+    # 新的一筆
+    # -----------------------------------------------------
 
-        if col not in latest_df.columns:
-
-            latest_df[col] = ""
-
-
-    latest_df = latest_df[
-        expected_columns
-    ]
-
-
-    # =====================================================
-    # 新增一筆資料
-    # =====================================================
-
-    new_row_df = pd.DataFrame(
+    new_row = pd.DataFrame(
         [current_data]
     )
-
 
     updated_df = pd.concat(
         [
             latest_df,
-            new_row_df
+            new_row
         ],
         ignore_index=True
     )
 
 
-    # =====================================================
-    # 轉成 CSV
-    # =====================================================
-
-    csv_string = (
-        updated_df.to_csv(
-            index=False
-        )
+    # 欄位固定
+    updated_df = updated_df.reindex(
+        columns=expected_columns
     )
 
 
-    # =====================================================
-    # Base64
-    #
-    # 使用 utf-8-sig
-    # Excel 開中文比較不容易亂碼
-    # =====================================================
+    # -----------------------------------------------------
+    # CSV
+    # -----------------------------------------------------
+
+    csv_string = updated_df.to_csv(
+        index=False
+    )
 
     encoded_csv = base64.b64encode(
         csv_string.encode(
@@ -397,34 +332,27 @@ def save_to_github(
     )
 
 
-    # =====================================================
-    # GitHub payload
-    # =====================================================
+    # -----------------------------------------------------
+    # Payload
+    # -----------------------------------------------------
 
     payload = {
-
-        "message":
-            (
-                "OSDI questionnaire update - "
-                f"{current_data['姓名']}"
-            ),
-
-        "content":
-            encoded_csv
+        "message": (
+            f"OSDI questionnaire update - "
+            f"{current_data['姓名']}"
+        ),
+        "content": encoded_csv,
+        "branch": BRANCH
     }
 
 
-    # CSV 已存在才加 sha
     if latest_sha is not None:
-
-        payload["sha"] = (
-            latest_sha
-        )
+        payload["sha"] = latest_sha
 
 
-    # =====================================================
+    # -----------------------------------------------------
     # PUT
-    # =====================================================
+    # -----------------------------------------------------
 
     try:
 
@@ -435,24 +363,20 @@ def save_to_github(
             timeout=20
         )
 
-
         print(
-            "OSDI PUT GitHub status:",
+            "OSDI PUT status:",
             response.status_code
         )
 
         print(
-            "OSDI PUT GitHub response:",
+            "OSDI PUT response:",
             response.text[:1000]
         )
 
 
-        # -------------------------------------------------
+        # =================================================
         # 成功
-        #
-        # 201 = 第一次建立
-        # 200 = 更新
-        # -------------------------------------------------
+        # =================================================
 
         if response.status_code in [
             200,
@@ -466,259 +390,230 @@ def save_to_github(
 
 
         # =================================================
-        # 409
-        #
-        # 可能剛好另一個人也寫入 CSV
-        # 重新抓最新版再試一次
+        # SHA 衝突
+        # 再試一次
         # =================================================
 
         if response.status_code == 409:
 
-            retry_df, retry_sha, retry_error = (
-                get_github_data()
-            )
-
-
-            if retry_error is not None:
-
-                return (
-                    False,
-                    {
-                        "stage":
-                            "retry_read",
-
-                        "error":
-                            retry_error
-                    }
-                )
-
-
-            # ---------------------------------------------
-            # 補齊欄位
-            # ---------------------------------------------
-
-            for col in expected_columns:
-
-                if col not in retry_df.columns:
-
-                    retry_df[col] = ""
-
-
-            retry_df = retry_df[
-                expected_columns
-            ]
-
-
-            # ---------------------------------------------
-            # 再加入這筆資料
-            # ---------------------------------------------
-
-            retry_updated_df = (
-                pd.concat(
-                    [
-                        retry_df,
-                        pd.DataFrame(
-                            [current_data]
-                        )
-                    ],
-                    ignore_index=True
-                )
-            )
-
-
-            retry_csv = (
-                retry_updated_df.to_csv(
-                    index=False
-                )
-            )
-
-
-            # ---------------------------------------------
-            # Retry payload
-            # ---------------------------------------------
-
-            retry_payload = {
-
-                "message":
-                    (
-                        "OSDI questionnaire update - "
-                        f"{current_data['姓名']}"
-                    ),
-
-                "content":
-                    base64.b64encode(
-                        retry_csv.encode(
-                            "utf-8-sig"
-                        )
-                    ).decode(
-                        "utf-8"
-                    )
-            }
-
-
-            if retry_sha is not None:
-
-                retry_payload["sha"] = (
-                    retry_sha
-                )
-
-
-            # ---------------------------------------------
-            # Retry PUT
-            # ---------------------------------------------
-
-            retry_response = (
-                requests.put(
-                    GITHUB_URL,
-                    headers=
-                        GITHUB_HEADERS,
-                    json=
-                        retry_payload,
-                    timeout=20
-                )
-            )
-
-
-            print(
-                "OSDI RETRY status:",
-                retry_response.status_code
-            )
-
-
-            if retry_response.status_code in [
-                200,
-                201
-            ]:
-
-                return (
-                    True,
-                    retry_response.json()
-                )
-
-
-            try:
-
-                retry_detail = (
-                    retry_response.json()
-                )
-
-            except Exception:
-
-                retry_detail = {
-                    "message":
-                        retry_response.text
-                }
-
-
-            return (
-                False,
-                {
-                    "stage":
-                        "retry_write",
-
-                    "status":
-                        retry_response.status_code,
-
-                    "detail":
-                        retry_detail
-                }
+            return retry_save_to_github(
+                current_data
             )
 
 
         # =================================================
-        # 其他 HTTP 錯誤
+        # 其他錯誤
         # =================================================
 
         try:
-
-            error_detail = (
-                response.json()
-            )
+            detail = response.json()
 
         except Exception:
-
-            error_detail = {
-                "message":
-                    response.text
-            }
+            detail = response.text
 
 
         return (
             False,
             {
-                "stage":
-                    "write",
-
-                "status":
-                    response.status_code,
-
-                "detail":
-                    error_detail
+                "stage": "write",
+                "status": response.status_code,
+                "detail": detail
             }
         )
 
-
-    # =====================================================
-    # Timeout
-    # =====================================================
 
     except requests.exceptions.Timeout:
 
         return (
             False,
             {
-                "stage":
-                    "write",
-
-                "status":
-                    "timeout",
-
-                "detail":
-                    "連線 GitHub 逾時"
+                "stage": "write",
+                "status": "timeout",
+                "detail": "GitHub 寫入逾時"
             }
         )
 
-
-    # =====================================================
-    # Request Error
-    # =====================================================
-
-    except requests.exceptions.RequestException as e:
-
-        return (
-            False,
-            {
-                "stage":
-                    "write",
-
-                "status":
-                    "request_error",
-
-                "detail":
-                    str(e)
-            }
-        )
-
-
-    # =====================================================
-    # 其他錯誤
-    # =====================================================
 
     except Exception as e:
 
         return (
             False,
             {
-                "stage":
-                    "write",
-
-                "status":
-                    "unknown",
-
-                "detail":
-                    str(e)
+                "stage": "write",
+                "status": "error",
+                "detail": str(e)
             }
         )
+
+
+# =========================================================
+# 409 Retry
+# =========================================================
+
+def retry_save_to_github(current_data):
+
+    latest_df, latest_sha, read_error = (
+        get_github_data()
+    )
+
+
+    if read_error is not None:
+
+        return (
+            False,
+            {
+                "stage": "retry_read",
+                **read_error
+            }
+        )
+
+
+    updated_df = pd.concat(
+        [
+            latest_df,
+            pd.DataFrame(
+                [current_data]
+            )
+        ],
+        ignore_index=True
+    )
+
+
+    updated_df = updated_df.reindex(
+        columns=create_columns()
+    )
+
+
+    csv_string = updated_df.to_csv(
+        index=False
+    )
+
+
+    payload = {
+        "message": (
+            f"OSDI questionnaire update - "
+            f"{current_data['姓名']}"
+        ),
+
+        "content": base64.b64encode(
+            csv_string.encode(
+                "utf-8-sig"
+            )
+        ).decode(
+            "utf-8"
+        ),
+
+        "branch": BRANCH
+    }
+
+
+    if latest_sha is not None:
+        payload["sha"] = latest_sha
+
+
+    try:
+
+        response = requests.put(
+            GITHUB_URL,
+            headers=GITHUB_HEADERS,
+            json=payload,
+            timeout=20
+        )
+
+
+        print(
+            "OSDI RETRY status:",
+            response.status_code
+        )
+
+
+        if response.status_code in [
+            200,
+            201
+        ]:
+
+            return (
+                True,
+                response.json()
+            )
+
+
+        try:
+            detail = response.json()
+
+        except Exception:
+            detail = response.text
+
+
+        return (
+            False,
+            {
+                "stage": "retry_write",
+                "status": response.status_code,
+                "detail": detail
+            }
+        )
+
+
+    except Exception as e:
+
+        return (
+            False,
+            {
+                "stage": "retry_write",
+                "status": "error",
+                "detail": str(e)
+            }
+        )
+
+
+# =========================================================
+# 驗證資料真的存在 GitHub CSV
+# =========================================================
+
+def verify_saved_data(
+    name,
+    phone,
+    filled_time
+):
+
+    try:
+
+        df, _, error = get_github_data()
+
+
+        if error is not None:
+            return False
+
+
+        if df.empty:
+            return False
+
+
+        matched = df[
+            (
+                df["姓名"].astype(str)
+                == str(name)
+            )
+            &
+            (
+                df["手機號碼"].astype(str)
+                == str(phone)
+            )
+            &
+            (
+                df["填寫時間"].astype(str)
+                == str(filled_time)
+            )
+        ]
+
+
+        return not matched.empty
+
+
+    except Exception:
+
+        return False
 
 
 # =========================================================
@@ -730,48 +625,33 @@ def calculate_osdi(
 ):
 
     sum_scores = 0
-
     answered_count = 0
 
 
     for q in all_questions:
 
-        score = options_map[
-            responses[q]
-        ]
+        score = answer_to_score(
+            responses.get(q)
+        )
 
 
-        # -1 = 未作答
         if score != -1:
 
-            sum_scores += (
-                score
-            )
-
+            sum_scores += score
             answered_count += 1
 
 
-    # =====================================================
-    # OSDI 公式
-    #
-    # (回答分數總和 × 25)
-    # ÷ 實際回答題數
-    # =====================================================
-
     if answered_count > 0:
 
-        osdi_score = (
-            sum_scores
-            * 25
-            / answered_count
-        )
-
-
         osdi_score = round(
-            osdi_score,
+            (
+                sum_scores
+                * 25
+            )
+            /
+            answered_count,
             2
         )
-
 
     else:
 
@@ -785,7 +665,7 @@ def calculate_osdi(
 
 
 # =========================================================
-# OSDI 程度判定
+# OSDI 程度
 # =========================================================
 
 def determine_osdi_status(
@@ -793,22 +673,15 @@ def determine_osdi_status(
 ):
 
     if osdi_score <= 12:
-
         return "正常"
 
-
     elif osdi_score <= 22:
-
         return "輕度乾眼"
 
-
     elif osdi_score <= 32:
-
         return "中度乾眼"
 
-
     else:
-
         return "重度乾眼"
 
 
@@ -818,255 +691,241 @@ def determine_osdi_status(
 
 st.markdown(
     """
-    <style>
+<style>
 
-    /* ================================================
-       主內容
-    ================================================ */
+.block-container {
+    max-width: 950px;
+    padding-top: 2rem;
+    padding-bottom: 4rem;
+}
+
+
+/* =====================================================
+   返回首頁
+===================================================== */
+
+.home-link {
+    display: inline-flex;
+
+    align-items: center;
+
+    gap: 6px;
+
+    padding: 9px 17px;
+
+    margin-bottom: 20px;
+
+    background: #EDE7E1;
+
+    color: #6F6259 !important;
+
+    text-decoration: none !important;
+
+    border-radius: 10px;
+
+    font-size: 14px;
+
+    font-weight: 600;
+
+    transition: 0.2s ease;
+}
+
+.home-link:hover {
+    background: #DDD3CA;
+}
+
+
+/* =====================================================
+   Title
+===================================================== */
+
+.osdi-title {
+    text-align: center;
+
+    font-size: 34px;
+
+    font-weight: 700;
+
+    color: #6F6259;
+
+    margin-bottom: 8px;
+}
+
+
+.osdi-subtitle {
+    text-align: center;
+
+    color: #8A817A;
+
+    font-size: 15px;
+
+    margin-bottom: 28px;
+}
+
+
+/* =====================================================
+   Section
+===================================================== */
+
+.section-title {
+    font-size: 22px;
+
+    font-weight: 650;
+
+    color: #6F6259;
+
+    margin-top: 32px;
+
+    margin-bottom: 6px;
+
+    padding-bottom: 8px;
+
+    border-bottom:
+        2px solid #DDD4CC;
+}
+
+
+.section-caption {
+    color: #8D8782;
+
+    font-size: 14px;
+
+    margin-bottom: 18px;
+
+    line-height: 1.7;
+}
+
+
+/* =====================================================
+   Submit
+===================================================== */
+
+div[data-testid="stFormSubmitButton"] button {
+    background-color: #A99687;
+
+    color: white;
+
+    border-radius: 12px;
+
+    min-height: 50px;
+
+    border: none;
+
+    font-size: 17px;
+
+    font-weight: 600;
+
+    margin-top: 20px;
+}
+
+
+div[data-testid="stFormSubmitButton"] button:hover {
+    background-color: #8F7D70;
+
+    color: white;
+
+    border: none;
+}
+
+
+/* =====================================================
+   Result
+===================================================== */
+
+.osdi-result {
+    margin-top: 25px;
+
+    padding: 38px 32px;
+
+    background-color: #F5F0EB;
+
+    border-radius: 20px;
+
+    text-align: center;
+
+    color: #6F6259;
+}
+
+
+.result-label {
+    font-size: 16px;
+
+    color: #8A817A;
+
+    letter-spacing: 1px;
+}
+
+
+.osdi-score {
+    margin-top: 4px;
+
+    margin-bottom: 25px;
+
+    font-size: 46px;
+
+    font-weight: 700;
+
+    color: #806F62;
+}
+
+
+.result-status-label {
+    margin-top: 10px;
+}
+
+
+.result-status {
+    display: inline-block;
+
+    margin-top: 10px;
+
+    padding: 9px 24px;
+
+    background-color: #B5A293;
+
+    color: white;
+
+    border-radius: 22px;
+
+    font-size: 18px;
+
+    font-weight: 600;
+}
+
+
+.result-note {
+    margin-top: 24px;
+
+    color: #9A918A;
+
+    font-size: 13px;
+
+    line-height: 1.7;
+}
+
+
+/* =====================================================
+   Mobile
+===================================================== */
+
+@media (max-width: 768px) {
 
     .block-container {
-        max-width: 950px;
-        padding-top: 2rem;
-        padding-bottom: 4rem;
+        padding-left: 1rem;
+        padding-right: 1rem;
     }
-
-
-    /* ================================================
-       返回首頁
-    ================================================ */
-
-    .back-home {
-
-        display: inline-block;
-
-        margin-bottom: 18px;
-
-        padding: 8px 16px;
-
-        background-color: #EDE7E1;
-
-        color: #6F6259 !important;
-
-        text-decoration: none !important;
-
-        border-radius: 10px;
-
-        font-size: 14px;
-
-        font-weight: 600;
-
-        transition:
-            background-color 0.2s ease;
-    }
-
-
-    .back-home:hover {
-
-        background-color: #DDD3CA;
-
-        color: #6F6259 !important;
-    }
-
-
-    /* ================================================
-       標題
-    ================================================ */
 
     .osdi-title {
-
-        text-align: center;
-
-        font-size: 34px;
-
-        font-weight: 700;
-
-        color: #6F6259;
-
-        margin-bottom: 8px;
+        font-size: 27px;
     }
-
-
-    .osdi-subtitle {
-
-        text-align: center;
-
-        color: #8A817A;
-
-        font-size: 15px;
-
-        margin-bottom: 28px;
-    }
-
-
-    /* ================================================
-       Section
-    ================================================ */
 
     .section-title {
-
-        font-size: 22px;
-
-        font-weight: 650;
-
-        color: #6F6259;
-
-        margin-top: 32px;
-
-        margin-bottom: 6px;
-
-        padding-bottom: 8px;
-
-        border-bottom:
-            2px solid #DDD4CC;
+        font-size: 20px;
     }
 
+}
 
-    .section-caption {
-
-        color: #8D8782;
-
-        font-size: 14px;
-
-        margin-bottom: 18px;
-
-        line-height: 1.7;
-    }
-
-
-    /* ================================================
-       Radio
-    ================================================ */
-
-    div[role="radiogroup"] {
-
-        margin-bottom: 12px;
-    }
-
-
-    /* ================================================
-       Submit
-    ================================================ */
-
-    div[data-testid="stFormSubmitButton"] button {
-
-        background-color: #A99687;
-
-        color: white;
-
-        border-radius: 12px;
-
-        min-height: 50px;
-
-        border: none;
-
-        font-size: 17px;
-
-        font-weight: 600;
-
-        margin-top: 20px;
-    }
-
-
-    div[data-testid="stFormSubmitButton"] button:hover {
-
-        background-color: #8F7D70;
-
-        color: white;
-
-        border: none;
-    }
-
-
-    /* ================================================
-       結果
-    ================================================ */
-
-     .osdi-result {
-        margin-top: 24px;
-        padding: 30px 32px;
-    
-        background-color: #F5F0EB;
-    
-        border-radius: 18px;
-    
-        text-align: center;
-    
-        color: #6F6259;
-    }
-    
-    .result-label {
-        font-size: 15px;
-        color: #8A817A;
-        letter-spacing: 1px;
-    }
-    
-    .osdi-score {
-        font-size: 42px;
-        font-weight: 700;
-    
-        color: #806F62;
-    
-        margin-top: 4px;
-        margin-bottom: 20px;
-    }
-    
-    .result-status-label {
-        margin-top: 8px;
-    }
-    
-    .result-status {
-        display: inline-block;
-    
-        margin-top: 8px;
-    
-        padding: 8px 22px;
-    
-        background-color: #B5A293;
-        color: white;
-    
-        border-radius: 20px;
-    
-        font-size: 18px;
-        font-weight: 600;
-    }
-    
-    .result-note {
-        margin-top: 22px;
-    
-        color: #9A918A;
-    
-        font-size: 13px;
-    
-        line-height: 1.7;
-    }
-    /* ================================================
-       手機
-    ================================================ */
-
-    @media (max-width: 768px) {
-
-        .block-container {
-
-            padding-left: 1rem;
-
-            padding-right: 1rem;
-        }
-
-
-        .osdi-title {
-
-            font-size: 27px;
-        }
-
-
-        .section-title {
-
-            font-size: 20px;
-        }
-
-    }
-
-    </style>
+</style>
     """,
     unsafe_allow_html=True
 )
@@ -1075,25 +934,26 @@ st.markdown(
 # =========================================================
 # 返回首頁
 #
-# 不再使用：
+# 注意：
+# 使用 ./ 而不是 /
 #
-# st.switch_page("main.py")
+# OSDI URL：
+# ...streamlit.app/OSDI
 #
-# 因為 main.py 是 navigation entrypoint，
-# 不是可以被 switch_page 直接指定的 page。
+# ./ 會回：
+# ...streamlit.app/
 # =========================================================
 
-st.markdown(
+st.html(
     """
-    <a
-        class="back-home"
-        href="/"
-        target="_self"
-    >
-        ← 返回首頁
-    </a>
-    """,
-    unsafe_allow_html=True
+<a
+    class="home-link"
+    href="./"
+    target="_self"
+>
+    ← 返回首頁
+</a>
+    """
 )
 
 
@@ -1101,17 +961,16 @@ st.markdown(
 # 標題
 # =========================================================
 
-st.markdown(
+st.html(
     """
-    <div class="osdi-title">
-        OSDI 眼睛疾病量表
-    </div>
+<div class="osdi-title">
+    OSDI 眼睛疾病量表
+</div>
 
-    <div class="osdi-subtitle">
-        請依照您過去一週的實際情況填寫
-    </div>
-    """,
-    unsafe_allow_html=True
+<div class="osdi-subtitle">
+    請依照您過去一週的實際情況填寫
+</div>
+    """
 )
 
 
@@ -1127,9 +986,7 @@ with st.form(
     # 基本資料
     # =====================================================
 
-    col1, col2 = st.columns(
-        2
-    )
+    col1, col2 = st.columns(2)
 
 
     with col1:
@@ -1152,134 +1009,106 @@ with st.form(
 
 
     # =====================================================
-    # A. 眼睛症狀
+    # A
     # =====================================================
 
-    st.markdown(
+    st.html(
         """
-        <div class="section-title">
-            A. 眼睛症狀
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
+<div class="section-title">
+    A. 眼睛症狀
+</div>
 
-
-    st.markdown(
+<div class="section-caption">
+    在過去一週中，您是否出現下列任一症狀？
+</div>
         """
-        <div class="section-caption">
-            在過去一週中，您是否出現下列任一症狀？
-        </div>
-        """,
-        unsafe_allow_html=True
     )
 
 
     for q in cat_a:
 
-        responses[q] = (
-            st.radio(
-                q,
+        responses[q] = st.radio(
+            q,
 
-                options=list(
-                    options_map.keys()
-                ),
+            options=list(
+                options_map.keys()
+            ),
 
-                # 預設「未作答」
-                index=None,
+            index=None,
 
-                horizontal=True,
+            horizontal=True,
 
-                key=f"osdi_{q}"
-            )
+            key=f"osdi_{q}"
         )
 
 
     # =====================================================
-    # B. 日常活動
+    # B
     # =====================================================
 
-    st.markdown(
+    st.html(
         """
-        <div class="section-title">
-            B. 日常活動
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
+<div class="section-title">
+    B. 日常活動
+</div>
 
-
-    st.markdown(
+<div class="section-caption">
+    在過去一週從事下列任一活動時，
+    您是否曾因眼睛的問題而受到限制？
+</div>
         """
-        <div class="section-caption">
-            在過去一週從事下列任一活動時，
-            您是否曾因眼睛的問題而受到限制？
-        </div>
-        """,
-        unsafe_allow_html=True
     )
 
 
     for q in cat_b:
 
-        responses[q] = (
-            st.radio(
-                q,
+        responses[q] = st.radio(
+            q,
 
-                options=list(
-                    options_map.keys()
-                ),
+            options=list(
+                options_map.keys()
+            ),
 
-                index=5,
+            index=None,
 
-                horizontal=True,
+            horizontal=True,
 
-                key=f"osdi_{q}"
-            )
+            key=f"osdi_{q}"
         )
 
 
     # =====================================================
-    # C. 環境因素
+    # C
     # =====================================================
 
-    st.markdown(
+    st.html(
         """
-        <div class="section-title">
-            C. 環境因素
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
+<div class="section-title">
+    C. 環境因素
+</div>
 
-
-    st.markdown(
+<div class="section-caption">
+    在過去一週中遇到下列任一狀況時，
+    您的眼睛是否曾感覺不適？
+</div>
         """
-        <div class="section-caption">
-            在過去一週中遇到下列任一狀況時，
-            您的眼睛是否曾感覺不適？
-        </div>
-        """,
-        unsafe_allow_html=True
     )
 
 
     for q in cat_c:
 
-        responses[q] = (
-            st.radio(
-                q,
+        responses[q] = st.radio(
+            q,
 
-                options=list(
-                    options_map.keys()
-                ),
+            options=list(
+                options_map.keys()
+            ),
 
-                index=5,
+            index=None,
 
-                horizontal=True,
+            horizontal=True,
 
-                key=f"osdi_{q}"
-            )
+            key=f"osdi_{q}"
         )
 
 
@@ -1287,16 +1116,14 @@ with st.form(
     # Submit
     # =====================================================
 
-    submitted = (
-        st.form_submit_button(
-            "確認送出",
-            use_container_width=True
-        )
+    submitted = st.form_submit_button(
+        "確認送出",
+        use_container_width=True
     )
 
 
 # =========================================================
-# 送出
+# Submit
 # =========================================================
 
 if submitted:
@@ -1314,7 +1141,7 @@ if submitted:
 
 
     # =====================================================
-    # 手機號碼
+    # 手機
     # =====================================================
 
     elif not phone.strip():
@@ -1324,37 +1151,33 @@ if submitted:
         )
 
 
-    # =====================================================
-    # 建立資料
-    # =====================================================
-
     else:
 
+        # =================================================
+        # 建立資料
+        # =================================================
+
         current_data = {
-
-            "姓名":
-                name.strip(),
-
-            "手機號碼":
-                phone.strip()
+            "姓名": name.strip(),
+            "手機號碼": phone.strip()
         }
 
 
         # =================================================
-        # 儲存每題回答
+        # 回答
         # =================================================
 
         for q in all_questions:
 
-            current_data[
-                q
-            ] = options_map[
-                responses[q]
-            ]
+            current_data[q] = (
+                answer_to_score(
+                    responses.get(q)
+                )
+            )
 
 
         # =================================================
-        # OSDI 計算
+        # 計算
         # =================================================
 
         (
@@ -1366,7 +1189,7 @@ if submitted:
 
 
         # =================================================
-        # 全部都是未作答
+        # 全部沒回答
         # =================================================
 
         if answered_count == 0:
@@ -1379,10 +1202,10 @@ if submitted:
         else:
 
             # =============================================
-            # 程度
+            # 狀態
             # =============================================
 
-            status = (
+            osdi_status = (
                 determine_osdi_status(
                     osdi_score
                 )
@@ -1390,7 +1213,19 @@ if submitted:
 
 
             # =============================================
-            # 存結果
+            # 時間
+            # =============================================
+
+            filled_time = (
+                datetime.now()
+                .strftime(
+                    "%Y-%m-%d %H:%M:%S"
+                )
+            )
+
+
+            # =============================================
+            # 完整資料
             # =============================================
 
             current_data[
@@ -1400,18 +1235,16 @@ if submitted:
 
             current_data[
                 "程度評估"
-            ] = status
+            ] = osdi_status
 
 
             current_data[
                 "填寫時間"
-            ] = datetime.now().strftime(
-                "%Y-%m-%d %H:%M:%S"
-            )
+            ] = filled_time
 
 
             # =============================================
-            # 寫入 GitHub
+            # 寫入
             # =============================================
 
             with st.spinner(
@@ -1425,39 +1258,91 @@ if submitted:
                 )
 
 
-            if success:
-            
-                st.success("眼睛疾病問卷送出成功！")
-            
-                st.markdown(
-                    f"""
-            <div class="osdi-result">
-                <div class="result-label">OSDI 分數</div>
-                <div class="osdi-score">{osdi_score}</div>
-            
-                <div class="result-label result-status-label">
-                    評估結果
-                </div>
-            
-                <div class="result-status">
-                    {status}
-                </div>
-            
-                <div class="result-note">
-                    此結果僅供問卷評估參考，實際狀況仍需由專業醫療人員判斷。
-                </div>
-            </div>
-                    """,
-                    unsafe_allow_html=True
-                )
             # =============================================
-            # 失敗
+            # PUT 成功後再驗證一次
+            # =============================================
+
+            if success:
+
+                saved_confirmed = (
+                    verify_saved_data(
+                        name.strip(),
+                        phone.strip(),
+                        filled_time
+                    )
+                )
+
+
+                # =========================================
+                # GitHub 真的有資料
+                # =========================================
+
+                if saved_confirmed:
+
+                    st.success(
+                        "眼睛疾病問卷送出成功！"
+                    )
+
+
+                    # =====================================
+                    # 使用 st.html
+                    #
+                    # 不會再把 div 顯示成程式碼
+                    # =====================================
+
+                    result_html = f"""
+<div class="osdi-result">
+
+    <div class="result-label">
+        OSDI 分數
+    </div>
+
+    <div class="osdi-score">
+        {osdi_score}
+    </div>
+
+    <div class="result-label result-status-label">
+        評估結果
+    </div>
+
+    <div class="result-status">
+        {osdi_status}
+    </div>
+
+    <div class="result-note">
+        此結果僅供問卷評估參考，
+        實際狀況仍需由專業醫療人員判斷。
+    </div>
+
+</div>
+"""
+
+                    st.html(
+                        result_html
+                    )
+
+
+                # =========================================
+                # PUT 說成功但重新讀不到
+                # =========================================
+
+                else:
+
+                    st.warning(
+                        "GitHub API 已回報寫入成功，"
+                        "但系統暫時無法再次確認資料。"
+                        "請至 GitHub 的 osdi_data.csv 確認。"
+                    )
+
+
+            # =============================================
+            # PUT 失敗
             # =============================================
 
             else:
 
                 st.error(
-                    "問卷已完成，但資料沒有成功寫入 GitHub。"
+                    "資料沒有成功寫入 GitHub。"
                 )
 
 
@@ -1518,6 +1403,7 @@ if submitted:
                             st.code(
                                 str(detail)
                             )
+
 
                 else:
 
