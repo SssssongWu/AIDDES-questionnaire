@@ -11,16 +11,14 @@ from io import StringIO
 # 基本設定
 # =========================================================
 
-# Token 放 Streamlit Secrets
+# GitHub Token 與 Repository 都從 Streamlit Secrets 取得
 GITHUB_TOKEN = st.secrets["GITHUB_TOKEN"]
-
-# 直接固定 Repo，避免 Secret 設錯寫到其他 Repository
-GITHUB_REPO = "ssssongwu/aiddes-questionnaire"
+GITHUB_REPO = st.secrets["GITHUB_REPO"]
 
 BRANCH = "main"
 FILE_PATH = "osdi_data.csv"
 
-# 目前 Streamlit App 首頁
+# Streamlit App 首頁
 HOME_URL = (
     "https://aiddes-questionnaire-hqqjp6u3pbssjeehd9aaz7"
     ".streamlit.app/"
@@ -36,7 +34,6 @@ GITHUB_HEADERS = {
     "Accept": "application/vnd.github+json",
     "X-GitHub-Api-Version": "2022-11-28"
 }
-
 
 # =========================================================
 # OSDI 題目
