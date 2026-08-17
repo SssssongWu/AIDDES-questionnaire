@@ -14,8 +14,13 @@ from io import StringIO
 GITHUB_TOKEN = st.secrets["GITHUB_TOKEN"]
 GITHUB_REPO = st.secrets["GITHUB_REPO"]
 
-FILE_PATH = "ccmq_data.csv"
 BRANCH = "main"
+FILE_PATH = "ccmq_data.csv"
+
+HOME_URL = (
+    "https://aiddes-questionnaire-hqqjp6u3pbssjeehd9aaz7"
+    ".streamlit.app/"
+)
 
 GITHUB_URL = (
     f"https://api.github.com/repos/"
@@ -146,8 +151,11 @@ questions = {
 
 # =========================================================
 # 平和質逆向題
+#
 # 第 2、3、4、5、7、8 題
-# Python index = 1、2、3、4、6、7
+#
+# Python index：
+# 1、2、3、4、6、7
 # =========================================================
 
 reverse_questions = {
@@ -156,7 +164,7 @@ reverse_questions = {
 
 
 # =========================================================
-# 建立 CSV 欄位
+# CSV 欄位
 # =========================================================
 
 def create_columns():
@@ -166,6 +174,7 @@ def create_columns():
         "手機號碼"
     ]
 
+    # 每一題
     for constitution, qs in questions.items():
 
         for i, _ in enumerate(
@@ -178,6 +187,7 @@ def create_columns():
             )
 
 
+    # 原始分
     for constitution in questions:
 
         columns.append(
@@ -185,6 +195,7 @@ def create_columns():
         )
 
 
+    # 轉化分
     for constitution in questions:
 
         columns.append(
@@ -192,6 +203,7 @@ def create_columns():
         )
 
 
+    # 判定
     for constitution in questions:
 
         columns.append(
@@ -203,11 +215,12 @@ def create_columns():
         "填寫時間"
     )
 
+
     return columns
 
 
 # =========================================================
-# 讀取 GitHub CSV
+# GitHub：讀取 CSV
 # =========================================================
 
 def get_github_data():
@@ -223,9 +236,11 @@ def get_github_data():
             timeout=20
         )
 
+
         print(
-            "CCMQ GET status:",
-            response.status_code
+            "CCMQ GET:",
+            response.status_code,
+            GITHUB_URL
         )
 
 
@@ -242,9 +257,11 @@ def get_github_data():
                 ""
             )
 
+
             csv_bytes = base64.b64decode(
                 encoded_content
             )
+
 
             csv_content = csv_bytes.decode(
                 "utf-8-sig"
@@ -258,8 +275,13 @@ def get_github_data():
                     df = pd.read_csv(
                         StringIO(
                             csv_content
-                        )
+                        ),
+                        dtype={
+                            "姓名": str,
+                            "手機號碼": str
+                        }
                     )
+
 
                 except pd.errors.EmptyDataError:
 
@@ -267,12 +289,17 @@ def get_github_data():
                         columns=create_columns()
                     )
 
+
             else:
 
                 df = pd.DataFrame(
                     columns=create_columns()
                 )
 
+
+            # -------------------------------------------------
+            # 補齊欄位
+            # -------------------------------------------------
 
             expected_columns = (
                 create_columns()
@@ -286,9 +313,9 @@ def get_github_data():
                     df[col] = ""
 
 
-            df = df[
-                expected_columns
-            ]
+            df = df.reindex(
+                columns=expected_columns
+            )
 
 
             return (
@@ -299,6 +326,7 @@ def get_github_data():
 
 
         # =================================================
+        # CSV 尚未存在
         # 第一次使用
         # =================================================
 
@@ -317,30 +345,28 @@ def get_github_data():
         # 其他錯誤
         # =================================================
 
-        else:
+        try:
 
-            try:
+            detail = response.json()
 
-                detail = response.json()
+        except Exception:
 
-            except Exception:
-
-                detail = response.text
+            detail = response.text
 
 
-            return (
-                pd.DataFrame(
-                    columns=create_columns()
-                ),
-                None,
-                {
-                    "status":
-                        response.status_code,
+        return (
+            pd.DataFrame(
+                columns=create_columns()
+            ),
+            None,
+            {
+                "status":
+                    response.status_code,
 
-                    "detail":
-                        detail
-                }
-            )
+                "detail":
+                    detail
+            }
+        )
 
 
     except requests.exceptions.Timeout:
@@ -373,54 +399,16 @@ def get_github_data():
 
 
 # =========================================================
-# 寫入 GitHub
+# GitHub：PUT CSV
 # =========================================================
 
-def save_to_github(
-    current_data
+def put_github_csv(
+    df,
+    sha,
+    name
 ):
 
-    latest_df, latest_sha, read_error = (
-        get_github_data()
-    )
-
-
-    if read_error is not None:
-
-        return (
-            False,
-            {
-                "stage": "read",
-                **read_error
-            }
-        )
-
-
-    expected_columns = (
-        create_columns()
-    )
-
-
-    new_row = pd.DataFrame(
-        [current_data]
-    )
-
-
-    updated_df = pd.concat(
-        [
-            latest_df,
-            new_row
-        ],
-        ignore_index=True
-    )
-
-
-    updated_df = updated_df.reindex(
-        columns=expected_columns
-    )
-
-
-    csv_string = updated_df.to_csv(
+    csv_string = df.to_csv(
         index=False
     )
 
@@ -438,8 +426,8 @@ def save_to_github(
 
         "message":
             (
-                "CCMQ questionnaire update - "
-                f"{current_data['姓名']}"
+                f"CCMQ questionnaire update - "
+                f"{name}"
             ),
 
         "content":
@@ -450,11 +438,12 @@ def save_to_github(
     }
 
 
-    if latest_sha is not None:
+    # 已存在才放 SHA
+    if sha is not None:
 
         payload[
             "sha"
-        ] = latest_sha
+        ] = sha
 
 
     try:
@@ -463,7 +452,7 @@ def save_to_github(
             GITHUB_URL,
             headers=GITHUB_HEADERS,
             json=payload,
-            timeout=20
+            timeout=30
         )
 
 
@@ -472,11 +461,16 @@ def save_to_github(
             response.status_code
         )
 
+
         print(
-            "CCMQ PUT response:",
-            response.text[:1000]
+            "CCMQ PUT body:",
+            response.text[:1500]
         )
 
+
+        # =================================================
+        # 成功
+        # =================================================
 
         if response.status_code in [
             200,
@@ -486,17 +480,6 @@ def save_to_github(
             return (
                 True,
                 response.json()
-            )
-
-
-        # =================================================
-        # SHA conflict
-        # =================================================
-
-        if response.status_code == 409:
-
-            return retry_save_to_github(
-                current_data
             )
 
 
@@ -512,9 +495,9 @@ def save_to_github(
         return (
             False,
             {
-                "stage": "write",
                 "status":
                     response.status_code,
+
                 "detail":
                     detail
             }
@@ -526,8 +509,9 @@ def save_to_github(
         return (
             False,
             {
-                "stage": "write",
-                "status": "timeout",
+                "status":
+                    "timeout",
+
                 "detail":
                     "GitHub 寫入逾時"
             }
@@ -539,146 +523,6 @@ def save_to_github(
         return (
             False,
             {
-                "stage": "write",
-                "status": "error",
-                "detail": str(e)
-            }
-        )
-
-
-# =========================================================
-# 409 retry
-# =========================================================
-
-def retry_save_to_github(
-    current_data
-):
-
-    latest_df, latest_sha, read_error = (
-        get_github_data()
-    )
-
-
-    if read_error is not None:
-
-        return (
-            False,
-            {
-                "stage": "retry_read",
-                **read_error
-            }
-        )
-
-
-    updated_df = pd.concat(
-        [
-            latest_df,
-            pd.DataFrame(
-                [current_data]
-            )
-        ],
-        ignore_index=True
-    )
-
-
-    updated_df = updated_df.reindex(
-        columns=create_columns()
-    )
-
-
-    retry_csv = updated_df.to_csv(
-        index=False
-    )
-
-
-    retry_payload = {
-
-        "message":
-            (
-                "CCMQ questionnaire update - "
-                f"{current_data['姓名']}"
-            ),
-
-        "content":
-            base64.b64encode(
-                retry_csv.encode(
-                    "utf-8-sig"
-                )
-            ).decode(
-                "utf-8"
-            ),
-
-        "branch":
-            BRANCH
-    }
-
-
-    if latest_sha is not None:
-
-        retry_payload[
-            "sha"
-        ] = latest_sha
-
-
-    try:
-
-        response = requests.put(
-            GITHUB_URL,
-            headers=GITHUB_HEADERS,
-            json=retry_payload,
-            timeout=20
-        )
-
-
-        print(
-            "CCMQ RETRY status:",
-            response.status_code
-        )
-
-
-        if response.status_code in [
-            200,
-            201
-        ]:
-
-            return (
-                True,
-                response.json()
-            )
-
-
-        try:
-
-            detail = response.json()
-
-        except Exception:
-
-            detail = response.text
-
-
-        return (
-            False,
-            {
-                "stage":
-                    "retry_write",
-
-                "status":
-                    response.status_code,
-
-                "detail":
-                    detail
-            }
-        )
-
-
-    except Exception as e:
-
-        return (
-            False,
-            {
-                "stage":
-                    "retry_write",
-
                 "status":
                     "error",
 
@@ -689,7 +533,151 @@ def retry_save_to_github(
 
 
 # =========================================================
-# 驗證資料真的寫進 CSV
+# 儲存一筆問卷
+# =========================================================
+
+def save_to_github(
+    current_data
+):
+
+    # -----------------------------------------------------
+    # 讀最新版
+    # -----------------------------------------------------
+
+    latest_df, latest_sha, error = (
+        get_github_data()
+    )
+
+
+    if error is not None:
+
+        return (
+            False,
+            {
+                "stage":
+                    "read",
+
+                **error
+            }
+        )
+
+
+    # -----------------------------------------------------
+    # 新增資料
+    # -----------------------------------------------------
+
+    new_row = pd.DataFrame(
+        [current_data]
+    )
+
+
+    updated_df = pd.concat(
+        [
+            latest_df,
+            new_row
+        ],
+        ignore_index=True
+    )
+
+
+    updated_df = updated_df.reindex(
+        columns=create_columns()
+    )
+
+
+    # -----------------------------------------------------
+    # PUT
+    # -----------------------------------------------------
+
+    success, result = (
+        put_github_csv(
+            updated_df,
+            latest_sha,
+            current_data["姓名"]
+        )
+    )
+
+
+    if success:
+
+        return (
+            True,
+            result
+        )
+
+
+    # =====================================================
+    # SHA 衝突 → 再試一次
+    # =====================================================
+
+    if (
+        isinstance(result, dict)
+        and
+        result.get("status") == 409
+    ):
+
+        retry_df, retry_sha, retry_error = (
+            get_github_data()
+        )
+
+
+        if retry_error is not None:
+
+            return (
+                False,
+                {
+                    "stage":
+                        "retry_read",
+
+                    **retry_error
+                }
+            )
+
+
+        retry_df = pd.concat(
+            [
+                retry_df,
+                pd.DataFrame(
+                    [current_data]
+                )
+            ],
+            ignore_index=True
+        )
+
+
+        retry_df = retry_df.reindex(
+            columns=create_columns()
+        )
+
+
+        retry_success, retry_result = (
+            put_github_csv(
+                retry_df,
+                retry_sha,
+                current_data["姓名"]
+            )
+        )
+
+
+        return (
+            retry_success,
+            retry_result
+        )
+
+
+    return (
+        False,
+        {
+            "stage":
+                "write",
+
+            **result
+        }
+    )
+
+
+# =========================================================
+# GitHub：驗證資料
 # =========================================================
 
 def verify_saved_data(
@@ -715,20 +703,45 @@ def verify_saved_data(
             return False
 
 
+        # -------------------------------------------------
+        # 統一轉成字串
+        # -------------------------------------------------
+
+        df["姓名"] = (
+            df["姓名"]
+            .astype(str)
+            .str.strip()
+        )
+
+
+        df["手機號碼"] = (
+            df["手機號碼"]
+            .astype(str)
+            .str.strip()
+        )
+
+
+        df["填寫時間"] = (
+            df["填寫時間"]
+            .astype(str)
+            .str.strip()
+        )
+
+
         matched = df[
             (
-                df["姓名"].astype(str)
-                == str(name)
+                df["姓名"]
+                == str(name).strip()
             )
             &
             (
-                df["手機號碼"].astype(str)
-                == str(phone)
+                df["手機號碼"]
+                == str(phone).strip()
             )
             &
             (
-                df["填寫時間"].astype(str)
-                == str(filled_time)
+                df["填寫時間"]
+                == str(filled_time).strip()
             )
         ]
 
@@ -736,13 +749,18 @@ def verify_saved_data(
         return not matched.empty
 
 
-    except Exception:
+    except Exception as e:
+
+        print(
+            "CCMQ VERIFY ERROR:",
+            e
+        )
 
         return False
 
 
 # =========================================================
-# 計算某體質
+# 計算體質分數
 # =========================================================
 
 def calculate_constitution_score(
@@ -755,17 +773,29 @@ def calculate_constitution_score(
     )
 
 
+    # =====================================================
+    # 平和質逆向
+    # =====================================================
+
     if constitution in reverse_questions:
 
         for index in reverse_questions[
             constitution
         ]:
 
-            corrected_scores[index] = (
+            corrected_scores[
+                index
+            ] = (
                 6
-                - corrected_scores[index]
+                - corrected_scores[
+                    index
+                ]
             )
 
+
+    # =====================================================
+    # 原始分
+    # =====================================================
 
     raw_score = sum(
         corrected_scores
@@ -776,6 +806,13 @@ def calculate_constitution_score(
         corrected_scores
     )
 
+
+    # =====================================================
+    # 轉化分
+    #
+    # [(原始分 - 條目數)
+    # / (條目數 × 4)] × 100
+    # =====================================================
 
     transformed_score = (
         (
@@ -803,7 +840,7 @@ def calculate_constitution_score(
 
 
 # =========================================================
-# 判定九種體質
+# 判定體質
 # =========================================================
 
 def determine_constitution(
@@ -814,7 +851,7 @@ def determine_constitution(
 
 
     # =====================================================
-    # 八種偏頗
+    # 八種偏頗體質
     # =====================================================
 
     for (
@@ -873,6 +910,10 @@ def determine_constitution(
     ]
 
 
+    # -----------------------------------------------------
+    # 是
+    # -----------------------------------------------------
+
     if (
         pinghe_score >= 60
         and
@@ -886,6 +927,10 @@ def determine_constitution(
             "平和質"
         ] = "是"
 
+
+    # -----------------------------------------------------
+    # 基本是
+    # -----------------------------------------------------
 
     elif (
         pinghe_score >= 60
@@ -919,9 +964,17 @@ st.markdown(
     """
 <style>
 
+
+/* =====================================================
+   主畫面
+===================================================== */
+
 .block-container {
+
     max-width: 1000px;
+
     padding-top: 2rem;
+
     padding-bottom: 5rem;
 }
 
@@ -930,36 +983,31 @@ st.markdown(
    返回首頁
 ===================================================== */
 
-.home-link {
+div[data-testid="stLinkButton"] a {
 
-    display: inline-flex;
+    width: auto !important;
 
-    align-items: center;
-
-    padding: 9px 17px;
-
-    margin-bottom: 20px;
-
-    background: #EDE7E1;
+    background: #EDE7E1 !important;
 
     color: #6F6259 !important;
 
+    border: none !important;
+
+    border-radius: 10px !important;
+
+    padding: 8px 17px !important;
+
+    font-weight: 600 !important;
+
     text-decoration: none !important;
-
-    border-radius: 10px;
-
-    font-size: 14px;
-
-    font-weight: 600;
-
-    transition: 0.2s ease;
 }
 
 
-.home-link:hover {
+div[data-testid="stLinkButton"] a:hover {
 
-    background:
-        #DDD3CA;
+    background: #DDD3CA !important;
+
+    color: #6F6259 !important;
 }
 
 
@@ -994,7 +1042,7 @@ st.markdown(
 
 
 /* =====================================================
-   體質標題
+   Constitution
 ===================================================== */
 
 .constitution-title {
@@ -1061,97 +1109,104 @@ div[data-testid="stFormSubmitButton"] button:hover {
 
 
 /* =====================================================
-   結果總區
+   Result
+   跟 OSDI 同色系
 ===================================================== */
 
-.ccmq-results {
+.ccmq-result {
 
-    margin-top: 24px;
+    margin-top: 25px;
 
-    padding: 30px;
+    padding: 38px 32px;
 
-    background: #F6F2EE;
+    background-color: #F5F0EB;
 
     border-radius: 20px;
+
+    text-align: center;
+
+    color: #6F6259;
+}
+
+
+.result-label {
+
+    font-size: 16px;
+
+    color: #8A817A;
+
+    letter-spacing: 1px;
 }
 
 
 .result-main-title {
 
-    text-align: center;
+    margin-top: 6px;
 
-    color: #6F6259;
+    margin-bottom: 28px;
 
-    font-size: 25px;
+    font-size: 30px;
+
+    font-weight: 700;
+
+    color: #806F62;
+}
+
+
+/* =====================================================
+   單一體質
+===================================================== */
+
+.constitution-result {
+
+    padding: 18px 8px;
+
+    border-top:
+        1px solid #E1D8D0;
+}
+
+
+.constitution-result:first-child {
+
+    border-top: none;
+}
+
+
+.constitution-name {
+
+    font-size: 20px;
 
     font-weight: 700;
 
-    margin-bottom: 24px;
-}
-
-
-.result-grid {
-
-    display: grid;
-
-    grid-template-columns:
-        repeat(3, 1fr);
-
-    gap: 14px;
-}
-
-
-.result-card {
-
-    background: #FFFFFF;
-
-    border-radius: 14px;
-
-    padding: 18px;
-
-    text-align: center;
-
-    box-shadow:
-        0 2px 10px
-        rgba(70,60,50,0.06);
-}
-
-
-.result-name {
-
-    color: #6F6259;
-
-    font-size: 18px;
-
-    font-weight: 700;
+    color: #806F62;
 
     margin-bottom: 8px;
 }
 
 
-.result-score {
+.constitution-score {
 
     color: #8A817A;
 
-    font-size: 14px;
+    font-size: 15px;
 
-    margin-bottom: 10px;
+    margin-bottom: 9px;
 }
 
 
-.result-status {
+.constitution-status {
 
     display: inline-block;
 
-    padding: 6px 15px;
+    padding: 7px 20px;
 
-    background: #B5A293;
+    background-color: #B5A293;
 
-    color: #FFFFFF;
+    color: white;
 
-    border-radius: 18px;
+    border-radius: 22px;
 
-    font-size: 14px;
+    font-size: 15px;
 
     font-weight: 600;
 }
@@ -1159,9 +1214,12 @@ div[data-testid="stFormSubmitButton"] button:hover {
 
 .result-note {
 
-    margin-top: 22px;
+    margin-top: 26px;
 
-    text-align: center;
+    padding-top: 20px;
+
+    border-top:
+        1px solid #E1D8D0;
 
     color: #9A918A;
 
@@ -1197,10 +1255,10 @@ div[data-testid="stFormSubmitButton"] button:hover {
     }
 
 
-    .result-grid {
+    .ccmq-result {
 
-        grid-template-columns:
-            1fr;
+        padding:
+            28px 20px;
     }
 
 }
@@ -1215,16 +1273,9 @@ div[data-testid="stFormSubmitButton"] button:hover {
 # 返回首頁
 # =========================================================
 
-st.html(
-    """
-<a
-    class="home-link"
-    href="./"
-    target="_self"
->
-    ← 返回首頁
-</a>
-    """
+st.link_button(
+    "← 返回首頁",
+    HOME_URL
 )
 
 
@@ -1252,6 +1303,7 @@ st.html(
 with st.form(
     "ccmq_survey_form"
 ):
+
 
     # =====================================================
     # 基本資料
@@ -1311,6 +1363,10 @@ with st.form(
             )
 
 
+        # -------------------------------------------------
+        # 題目
+        # -------------------------------------------------
+
         for i, q in enumerate(
             qs,
             start=1
@@ -1339,21 +1395,27 @@ with st.form(
             )
 
 
-    submitted = st.form_submit_button(
-        "確認送出",
-        use_container_width=True
+    # =====================================================
+    # Submit
+    # =====================================================
+
+    submitted = (
+        st.form_submit_button(
+            "確認送出",
+            use_container_width=True
+        )
     )
 
 
 # =========================================================
-# 送出處理
+# Submit
 # =========================================================
 
 if submitted:
 
 
     # =====================================================
-    # 基本資料
+    # 姓名
     # =====================================================
 
     if not name.strip():
@@ -1362,6 +1424,10 @@ if submitted:
             "請輸入姓名。"
         )
 
+
+    # =====================================================
+    # 手機
+    # =====================================================
 
     elif not phone.strip():
 
@@ -1392,13 +1458,14 @@ if submitted:
 
 
     # =====================================================
-    # 完整
+    # 正式計算
     # =====================================================
 
     else:
 
 
         current_data = {
+
             "姓名":
                 name.strip(),
 
@@ -1440,9 +1507,11 @@ if submitted:
                 )
 
 
-                score = options_map[
-                    answer_text
-                ]
+                score = (
+                    options_map[
+                        answer_text
+                    ]
+                )
 
 
                 current_data[
@@ -1461,10 +1530,11 @@ if submitted:
 
 
         # =================================================
-        # 計算
+        # 計算分數
         # =================================================
 
         raw_total_scores = {}
+
         transformed_scores = {}
 
 
@@ -1498,7 +1568,7 @@ if submitted:
 
 
         # =================================================
-        # 判定
+        # 體質判定
         # =================================================
 
         constitution_results = (
@@ -1509,7 +1579,7 @@ if submitted:
 
 
         # =================================================
-        # 存結果
+        # 加進 CSV Data
         # =================================================
 
         for constitution in questions:
@@ -1517,27 +1587,33 @@ if submitted:
 
             current_data[
                 f"{constitution}_原始分"
-            ] = raw_total_scores[
-                constitution
-            ]
+            ] = (
+                raw_total_scores[
+                    constitution
+                ]
+            )
 
 
             current_data[
                 f"{constitution}_轉化分"
-            ] = transformed_scores[
-                constitution
-            ]
+            ] = (
+                transformed_scores[
+                    constitution
+                ]
+            )
 
 
             current_data[
                 f"{constitution}_判定"
-            ] = constitution_results[
-                constitution
-            ]
+            ] = (
+                constitution_results[
+                    constitution
+                ]
+            )
 
 
         # =================================================
-        # 時間
+        # 填寫時間
         # =================================================
 
         filled_time = (
@@ -1554,12 +1630,86 @@ if submitted:
 
 
         # =================================================
-        # GitHub
+        # ★ 先顯示結果
+        #
+        # 不管 GitHub 有沒有成功
+        # 都會先顯示
+        # =================================================
+
+        constitution_html = ""
+
+
+        for constitution in questions:
+
+
+            score = (
+                transformed_scores[
+                    constitution
+                ]
+            )
+
+
+            result_text = (
+                constitution_results[
+                    constitution
+                ]
+            )
+
+
+            constitution_html += f"""
+<div class="constitution-result">
+
+    <div class="constitution-name">
+        {constitution}
+    </div>
+
+    <div class="constitution-score">
+        轉化分：{score}
+    </div>
+
+    <div class="constitution-status">
+        {result_text}
+    </div>
+
+</div>
+"""
+
+
+        result_html = f"""
+<div class="ccmq-result">
+
+    <div class="result-label">
+        CCMQ
+    </div>
+
+    <div class="result-main-title">
+        體質評估結果
+    </div>
+
+    {constitution_html}
+
+    <div class="result-note">
+        此結果僅供問卷評估參考，
+        實際狀況仍需由專業醫療人員判斷。
+    </div>
+
+</div>
+"""
+
+
+        st.html(
+            result_html
+        )
+
+
+        # =================================================
+        # 再寫入 GitHub
         # =================================================
 
         with st.spinner(
             "正在儲存問卷資料..."
         ):
+
 
             success, result = (
                 save_to_github(
@@ -1569,10 +1719,31 @@ if submitted:
 
 
         # =================================================
-        # PUT 成功 → 再確認 CSV
+        # GitHub 成功
         # =================================================
 
         if success:
+
+
+            github_content = (
+                result.get(
+                    "content",
+                    {}
+                )
+                if isinstance(
+                    result,
+                    dict
+                )
+                else {}
+            )
+
+
+            actual_path = (
+                github_content.get(
+                    "path",
+                    FILE_PATH
+                )
+            )
 
 
             saved_confirmed = (
@@ -1592,96 +1763,34 @@ if submitted:
                 )
 
 
-                # =========================================
-                # 結果 HTML
-                # =========================================
-
-                cards_html = ""
-
-
-                for constitution in questions:
-
-
-                    score = (
-                        transformed_scores[
-                            constitution
-                        ]
-                    )
-
-
-                    result_text = (
-                        constitution_results[
-                            constitution
-                        ]
-                    )
-
-
-                    cards_html += f"""
-<div class="result-card">
-
-    <div class="result-name">
-        {constitution}
-    </div>
-
-    <div class="result-score">
-        轉化分：{score}
-    </div>
-
-    <div class="result-status">
-        {result_text}
-    </div>
-
-</div>
-"""
-
-
-                result_html = f"""
-<div class="ccmq-results">
-
-    <div class="result-main-title">
-        體質評估結果
-    </div>
-
-    <div class="result-grid">
-        {cards_html}
-    </div>
-
-    <div class="result-note">
-        此結果僅供問卷評估參考，
-        實際狀況仍需由專業醫療人員判斷。
-    </div>
-
-</div>
-"""
-
-
-                st.html(
-                    result_html
+                st.caption(
+                    f"資料已寫入："
+                    f"{GITHUB_REPO}/"
+                    f"{actual_path} "
+                    f"（{BRANCH} branch）"
                 )
 
 
-            # =================================================
-            # PUT 成功，但再次讀不到
-            # =================================================
-
             else:
 
+
                 st.warning(
-                    "GitHub API 已回報寫入成功，"
-                    "但系統暫時無法再次確認資料。"
-                    "請至 GitHub 的 ccmq_data.csv 確認。"
+                    "體質評估已完成，"
+                    "GitHub API 回報寫入成功，"
+                    "但目前無法再次確認 CSV 資料。"
                 )
 
 
         # =================================================
-        # 寫入失敗
+        # GitHub 失敗
         # =================================================
 
         else:
 
 
-            st.error(
-                "資料沒有成功寫入 GitHub。"
+            st.warning(
+                "體質評估已完成，"
+                "但資料目前沒有成功寫入 GitHub。"
             )
 
 
@@ -1705,24 +1814,23 @@ if submitted:
 
                 detail = result.get(
                     "detail",
-                    result.get(
-                        "error",
-                        ""
-                    )
+                    ""
                 )
 
 
                 if stage:
 
                     st.write(
-                        f"錯誤階段：{stage}"
+                        "錯誤階段：",
+                        stage
                     )
 
 
                 if status_code:
 
                     st.write(
-                        f"HTTP 狀態：{status_code}"
+                        "HTTP 狀態：",
+                        status_code
                     )
 
 
@@ -1740,15 +1848,9 @@ if submitted:
                             detail
                         )
 
+
                     else:
 
                         st.code(
                             str(detail)
                         )
-
-
-            else:
-
-                st.code(
-                    str(result)
-                )
