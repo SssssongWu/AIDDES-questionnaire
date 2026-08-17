@@ -8,14 +8,23 @@ from io import StringIO
 
 
 # =========================================================
-# GitHub 設定
+# 基本設定
 # =========================================================
 
+# Token 放 Streamlit Secrets
 GITHUB_TOKEN = st.secrets["GITHUB_TOKEN"]
-GITHUB_REPO = st.secrets["GITHUB_REPO"]
 
-FILE_PATH = "osdi_data.csv"
+# 直接固定 Repo，避免 Secret 設錯寫到其他 Repository
+GITHUB_REPO = "ssssongwu/aiddes-questionnaire"
+
 BRANCH = "main"
+FILE_PATH = "osdi_data.csv"
+
+# 目前 Streamlit App 首頁
+HOME_URL = (
+    "https://aiddes-questionnaire-hqqjp6u3pbssjeehd9aaz7"
+    ".streamlit.app/"
+)
 
 GITHUB_URL = (
     f"https://api.github.com/repos/"
@@ -30,7 +39,7 @@ GITHUB_HEADERS = {
 
 
 # =========================================================
-# OSDI 問卷題目
+# OSDI 題目
 # =========================================================
 
 cat_a = [
@@ -72,7 +81,7 @@ options_map = {
 
 
 # =========================================================
-# 建立 CSV 欄位
+# CSV 欄位
 # =========================================================
 
 def create_columns():
@@ -92,10 +101,7 @@ def create_columns():
 
 
 # =========================================================
-# 回答 → 分數
-#
-# 如果 radio 沒選，
-# 直接視為「未作答」
+# Answer → Score
 # =========================================================
 
 def answer_to_score(answer):
@@ -127,14 +133,14 @@ def get_github_data():
         )
 
         print(
-            "OSDI GET status:",
-            response.status_code
+            "OSDI GET:",
+            response.status_code,
+            GITHUB_URL
         )
 
-
-        # =================================================
+        # -------------------------------------------------
         # 已存在
-        # =================================================
+        # -------------------------------------------------
 
         if response.status_code == 200:
 
@@ -153,13 +159,16 @@ def get_github_data():
                 "utf-8-sig"
             )
 
-
             if csv_content.strip():
 
                 try:
 
                     df = pd.read_csv(
-                        StringIO(csv_content)
+                        StringIO(csv_content),
+                        dtype={
+                            "姓名": str,
+                            "手機號碼": str
+                        }
                     )
 
                 except pd.errors.EmptyDataError:
@@ -175,7 +184,6 @@ def get_github_data():
                 )
 
 
-            # 補齊欄位
             expected_columns = create_columns()
 
             for col in expected_columns:
@@ -183,9 +191,10 @@ def get_github_data():
                 if col not in df.columns:
                     df[col] = ""
 
-            df = df[
-                expected_columns
-            ]
+
+            df = df.reindex(
+                columns=expected_columns
+            )
 
 
             return (
@@ -195,9 +204,9 @@ def get_github_data():
             )
 
 
-        # =================================================
-        # 第一次使用
-        # =================================================
+        # -------------------------------------------------
+        # CSV 尚未存在
+        # -------------------------------------------------
 
         elif response.status_code == 404:
 
@@ -210,29 +219,29 @@ def get_github_data():
             )
 
 
-        # =================================================
-        # 其他錯誤
-        # =================================================
+        # -------------------------------------------------
+        # API error
+        # -------------------------------------------------
 
-        else:
+        try:
 
-            try:
-                detail = response.json()
+            detail = response.json()
 
-            except Exception:
-                detail = response.text
+        except Exception:
+
+            detail = response.text
 
 
-            return (
-                pd.DataFrame(
-                    columns=create_columns()
-                ),
-                None,
-                {
-                    "status": response.status_code,
-                    "detail": detail
-                }
-            )
+        return (
+            pd.DataFrame(
+                columns=create_columns()
+            ),
+            None,
+            {
+                "status": response.status_code,
+                "detail": detail
+            }
+        )
 
 
     except requests.exceptions.Timeout:
@@ -244,7 +253,7 @@ def get_github_data():
             None,
             {
                 "status": "timeout",
-                "detail": "連線 GitHub 逾時"
+                "detail": "GitHub 連線逾時"
             }
         )
 
@@ -264,62 +273,16 @@ def get_github_data():
 
 
 # =========================================================
-# 寫入 GitHub
+# 真正執行 GitHub PUT
 # =========================================================
 
-def save_to_github(current_data):
+def put_github_csv(
+    df,
+    sha,
+    name
+):
 
-    # -----------------------------------------------------
-    # 每次送出重新讀最新版
-    # -----------------------------------------------------
-
-    latest_df, latest_sha, read_error = (
-        get_github_data()
-    )
-
-
-    if read_error is not None:
-
-        return (
-            False,
-            {
-                "stage": "read",
-                **read_error
-            }
-        )
-
-
-    expected_columns = create_columns()
-
-
-    # -----------------------------------------------------
-    # 新的一筆
-    # -----------------------------------------------------
-
-    new_row = pd.DataFrame(
-        [current_data]
-    )
-
-    updated_df = pd.concat(
-        [
-            latest_df,
-            new_row
-        ],
-        ignore_index=True
-    )
-
-
-    # 欄位固定
-    updated_df = updated_df.reindex(
-        columns=expected_columns
-    )
-
-
-    # -----------------------------------------------------
-    # CSV
-    # -----------------------------------------------------
-
-    csv_string = updated_df.to_csv(
+    csv_string = df.to_csv(
         index=False
     )
 
@@ -332,27 +295,24 @@ def save_to_github(current_data):
     )
 
 
-    # -----------------------------------------------------
-    # Payload
-    # -----------------------------------------------------
-
     payload = {
-        "message": (
-            f"OSDI questionnaire update - "
-            f"{current_data['姓名']}"
-        ),
-        "content": encoded_csv,
-        "branch": BRANCH
+        "message":
+            f"OSDI questionnaire update - {name}",
+
+        "content":
+            encoded_csv,
+
+        "branch":
+            BRANCH
     }
 
 
-    if latest_sha is not None:
-        payload["sha"] = latest_sha
+    # 更新既有檔案一定要 SHA
+    # 第一次建立則不能放 SHA
+    if sha is not None:
 
+        payload["sha"] = sha
 
-    # -----------------------------------------------------
-    # PUT
-    # -----------------------------------------------------
 
     try:
 
@@ -360,8 +320,9 @@ def save_to_github(current_data):
             GITHUB_URL,
             headers=GITHUB_HEADERS,
             json=payload,
-            timeout=20
+            timeout=30
         )
+
 
         print(
             "OSDI PUT status:",
@@ -369,14 +330,10 @@ def save_to_github(current_data):
         )
 
         print(
-            "OSDI PUT response:",
-            response.text[:1000]
+            "OSDI PUT body:",
+            response.text[:1500]
         )
 
-
-        # =================================================
-        # 成功
-        # =================================================
 
         if response.status_code in [
             200,
@@ -389,47 +346,23 @@ def save_to_github(current_data):
             )
 
 
-        # =================================================
-        # SHA 衝突
-        # 再試一次
-        # =================================================
-
-        if response.status_code == 409:
-
-            return retry_save_to_github(
-                current_data
-            )
-
-
-        # =================================================
-        # 其他錯誤
-        # =================================================
-
         try:
+
             detail = response.json()
 
         except Exception:
+
             detail = response.text
 
 
         return (
             False,
             {
-                "stage": "write",
-                "status": response.status_code,
-                "detail": detail
-            }
-        )
+                "status":
+                    response.status_code,
 
-
-    except requests.exceptions.Timeout:
-
-        return (
-            False,
-            {
-                "stage": "write",
-                "status": "timeout",
-                "detail": "GitHub 寫入逾時"
+                "detail":
+                    detail
             }
         )
 
@@ -439,7 +372,6 @@ def save_to_github(current_data):
         return (
             False,
             {
-                "stage": "write",
                 "status": "error",
                 "detail": str(e)
             }
@@ -447,33 +379,46 @@ def save_to_github(current_data):
 
 
 # =========================================================
-# 409 Retry
+# 儲存一筆問卷
 # =========================================================
 
-def retry_save_to_github(current_data):
+def save_to_github(
+    current_data
+):
 
-    latest_df, latest_sha, read_error = (
+    # -----------------------------------------------------
+    # 先讀最新版
+    # -----------------------------------------------------
+
+    latest_df, latest_sha, error = (
         get_github_data()
     )
 
 
-    if read_error is not None:
+    if error is not None:
 
         return (
             False,
             {
-                "stage": "retry_read",
-                **read_error
+                "stage": "read",
+                **error
             }
         )
+
+
+    # -----------------------------------------------------
+    # 新增資料
+    # -----------------------------------------------------
+
+    new_row = pd.DataFrame(
+        [current_data]
+    )
 
 
     updated_df = pd.concat(
         [
             latest_df,
-            pd.DataFrame(
-                [current_data]
-            )
+            new_row
         ],
         ignore_index=True
     )
@@ -484,91 +429,97 @@ def retry_save_to_github(current_data):
     )
 
 
-    csv_string = updated_df.to_csv(
-        index=False
+    # -----------------------------------------------------
+    # PUT
+    # -----------------------------------------------------
+
+    success, result = put_github_csv(
+        updated_df,
+        latest_sha,
+        current_data["姓名"]
     )
 
 
-    payload = {
-        "message": (
-            f"OSDI questionnaire update - "
-            f"{current_data['姓名']}"
-        ),
+    # -----------------------------------------------------
+    # 成功
+    # -----------------------------------------------------
 
-        "content": base64.b64encode(
-            csv_string.encode(
-                "utf-8-sig"
-            )
-        ).decode(
-            "utf-8"
-        ),
+    if success:
 
-        "branch": BRANCH
-    }
-
-
-    if latest_sha is not None:
-        payload["sha"] = latest_sha
-
-
-    try:
-
-        response = requests.put(
-            GITHUB_URL,
-            headers=GITHUB_HEADERS,
-            json=payload,
-            timeout=20
+        return (
+            True,
+            result
         )
 
 
-        print(
-            "OSDI RETRY status:",
-            response.status_code
+    # -----------------------------------------------------
+    # 如果 SHA conflict
+    # 重新取得一次再寫
+    # -----------------------------------------------------
+
+    if (
+        isinstance(result, dict)
+        and result.get("status") == 409
+    ):
+
+        retry_df, retry_sha, retry_error = (
+            get_github_data()
         )
 
 
-        if response.status_code in [
-            200,
-            201
-        ]:
+        if retry_error is not None:
 
             return (
-                True,
-                response.json()
+                False,
+                {
+                    "stage": "retry_read",
+                    **retry_error
+                }
             )
 
 
-        try:
-            detail = response.json()
-
-        except Exception:
-            detail = response.text
-
-
-        return (
-            False,
-            {
-                "stage": "retry_write",
-                "status": response.status_code,
-                "detail": detail
-            }
+        retry_df = pd.concat(
+            [
+                retry_df,
+                pd.DataFrame(
+                    [current_data]
+                )
+            ],
+            ignore_index=True
         )
 
 
-    except Exception as e:
+        retry_df = retry_df.reindex(
+            columns=create_columns()
+        )
+
+
+        retry_success, retry_result = (
+            put_github_csv(
+                retry_df,
+                retry_sha,
+                current_data["姓名"]
+            )
+        )
+
 
         return (
-            False,
-            {
-                "stage": "retry_write",
-                "status": "error",
-                "detail": str(e)
-            }
+            retry_success,
+            retry_result
         )
+
+
+    return (
+        False,
+        {
+            "stage": "write",
+            **result
+        }
+    )
 
 
 # =========================================================
-# 驗證資料真的存在 GitHub CSV
+# 確認 GitHub 上真的存在這筆
 # =========================================================
 
 def verify_saved_data(
@@ -579,31 +530,55 @@ def verify_saved_data(
 
     try:
 
-        df, _, error = get_github_data()
+        df, _, error = (
+            get_github_data()
+        )
 
 
         if error is not None:
+
             return False
 
 
         if df.empty:
+
             return False
+
+
+        # 去除可能的空白
+        df["姓名"] = (
+            df["姓名"]
+            .astype(str)
+            .str.strip()
+        )
+
+        df["手機號碼"] = (
+            df["手機號碼"]
+            .astype(str)
+            .str.strip()
+        )
+
+        df["填寫時間"] = (
+            df["填寫時間"]
+            .astype(str)
+            .str.strip()
+        )
 
 
         matched = df[
             (
-                df["姓名"].astype(str)
-                == str(name)
+                df["姓名"]
+                == str(name).strip()
             )
             &
             (
-                df["手機號碼"].astype(str)
-                == str(phone)
+                df["手機號碼"]
+                == str(phone).strip()
             )
             &
             (
-                df["填寫時間"].astype(str)
-                == str(filled_time)
+                df["填寫時間"]
+                == str(filled_time).strip()
             )
         ]
 
@@ -611,13 +586,18 @@ def verify_saved_data(
         return not matched.empty
 
 
-    except Exception:
+    except Exception as e:
+
+        print(
+            "VERIFY ERROR:",
+            e
+        )
 
         return False
 
 
 # =========================================================
-# OSDI 分數計算
+# OSDI 計算
 # =========================================================
 
 def calculate_osdi(
@@ -673,15 +653,22 @@ def determine_osdi_status(
 ):
 
     if osdi_score <= 12:
+
         return "正常"
 
+
     elif osdi_score <= 22:
+
         return "輕度乾眼"
 
+
     elif osdi_score <= 32:
+
         return "中度乾眼"
 
+
     else:
+
         return "重度乾眼"
 
 
@@ -704,34 +691,31 @@ st.markdown(
    返回首頁
 ===================================================== */
 
-.home-link {
-    display: inline-flex;
+div[data-testid="stLinkButton"] a {
 
-    align-items: center;
+    width: auto !important;
 
-    gap: 6px;
-
-    padding: 9px 17px;
-
-    margin-bottom: 20px;
-
-    background: #EDE7E1;
+    background: #EDE7E1 !important;
 
     color: #6F6259 !important;
 
+    border: none !important;
+
+    border-radius: 10px !important;
+
+    padding: 8px 17px !important;
+
+    font-weight: 600 !important;
+
     text-decoration: none !important;
-
-    border-radius: 10px;
-
-    font-size: 14px;
-
-    font-weight: 600;
-
-    transition: 0.2s ease;
 }
 
-.home-link:hover {
-    background: #DDD3CA;
+
+div[data-testid="stLinkButton"] a:hover {
+
+    background: #DDD3CA !important;
+
+    color: #6F6259 !important;
 }
 
 
@@ -740,6 +724,7 @@ st.markdown(
 ===================================================== */
 
 .osdi-title {
+
     text-align: center;
 
     font-size: 34px;
@@ -753,6 +738,7 @@ st.markdown(
 
 
 .osdi-subtitle {
+
     text-align: center;
 
     color: #8A817A;
@@ -768,6 +754,7 @@ st.markdown(
 ===================================================== */
 
 .section-title {
+
     font-size: 22px;
 
     font-weight: 650;
@@ -786,6 +773,7 @@ st.markdown(
 
 
 .section-caption {
+
     color: #8D8782;
 
     font-size: 14px;
@@ -801,6 +789,7 @@ st.markdown(
 ===================================================== */
 
 div[data-testid="stFormSubmitButton"] button {
+
     background-color: #A99687;
 
     color: white;
@@ -820,6 +809,7 @@ div[data-testid="stFormSubmitButton"] button {
 
 
 div[data-testid="stFormSubmitButton"] button:hover {
+
     background-color: #8F7D70;
 
     color: white;
@@ -833,6 +823,7 @@ div[data-testid="stFormSubmitButton"] button:hover {
 ===================================================== */
 
 .osdi-result {
+
     margin-top: 25px;
 
     padding: 38px 32px;
@@ -848,6 +839,7 @@ div[data-testid="stFormSubmitButton"] button:hover {
 
 
 .result-label {
+
     font-size: 16px;
 
     color: #8A817A;
@@ -857,6 +849,7 @@ div[data-testid="stFormSubmitButton"] button:hover {
 
 
 .osdi-score {
+
     margin-top: 4px;
 
     margin-bottom: 25px;
@@ -870,11 +863,13 @@ div[data-testid="stFormSubmitButton"] button:hover {
 
 
 .result-status-label {
+
     margin-top: 10px;
 }
 
 
 .result-status {
+
     display: inline-block;
 
     margin-top: 10px;
@@ -894,6 +889,7 @@ div[data-testid="stFormSubmitButton"] button:hover {
 
 
 .result-note {
+
     margin-top: 24px;
 
     color: #9A918A;
@@ -911,15 +907,21 @@ div[data-testid="stFormSubmitButton"] button:hover {
 @media (max-width: 768px) {
 
     .block-container {
+
         padding-left: 1rem;
+
         padding-right: 1rem;
     }
 
+
     .osdi-title {
+
         font-size: 27px;
     }
 
+
     .section-title {
+
         font-size: 20px;
     }
 
@@ -934,26 +936,13 @@ div[data-testid="stFormSubmitButton"] button:hover {
 # =========================================================
 # 返回首頁
 #
-# 注意：
-# 使用 ./ 而不是 /
-#
-# OSDI URL：
-# ...streamlit.app/OSDI
-#
-# ./ 會回：
-# ...streamlit.app/
+# 這次不用 href="./"
+# 直接使用 Streamlit 的 Link Button + 完整網址
 # =========================================================
 
-st.html(
-    """
-<a
-    class="home-link"
-    href="./"
-    target="_self"
->
-    ← 返回首頁
-</a>
-    """
+st.link_button(
+    "← 返回首頁",
+    HOME_URL
 )
 
 
@@ -982,11 +971,14 @@ with st.form(
     "osdi_survey_form"
 ):
 
+
     # =====================================================
     # 基本資料
     # =====================================================
 
-    col1, col2 = st.columns(2)
+    col1, col2 = st.columns(
+        2
+    )
 
 
     with col1:
@@ -1154,17 +1146,21 @@ if submitted:
     else:
 
         # =================================================
-        # 建立資料
+        # Current Data
         # =================================================
 
         current_data = {
-            "姓名": name.strip(),
-            "手機號碼": phone.strip()
+
+            "姓名":
+                name.strip(),
+
+            "手機號碼":
+                phone.strip()
         }
 
 
         # =================================================
-        # 回答
+        # 每題
         # =================================================
 
         for q in all_questions:
@@ -1189,7 +1185,7 @@ if submitted:
 
 
         # =================================================
-        # 全部沒回答
+        # 全部沒答
         # =================================================
 
         if answered_count == 0:
@@ -1202,7 +1198,7 @@ if submitted:
         else:
 
             # =============================================
-            # 狀態
+            # OSDI 狀態
             # =============================================
 
             osdi_status = (
@@ -1224,10 +1220,6 @@ if submitted:
             )
 
 
-            # =============================================
-            # 完整資料
-            # =============================================
-
             current_data[
                 "OSDI總分"
             ] = osdi_score
@@ -1244,7 +1236,7 @@ if submitted:
 
 
             # =============================================
-            # 寫入
+            # 儲存
             # =============================================
 
             with st.spinner(
@@ -1259,10 +1251,36 @@ if submitted:
 
 
             # =============================================
-            # PUT 成功後再驗證一次
+            # PUT 成功
             # =============================================
 
             if success:
+
+                # GitHub 回傳的實際檔案資訊
+                github_content = (
+                    result.get(
+                        "content",
+                        {}
+                    )
+                    if isinstance(
+                        result,
+                        dict
+                    )
+                    else {}
+                )
+
+
+                actual_path = (
+                    github_content.get(
+                        "path",
+                        FILE_PATH
+                    )
+                )
+
+
+                # =========================================
+                # 再重新 GET 確認
+                # =========================================
 
                 saved_confirmed = (
                     verify_saved_data(
@@ -1273,10 +1291,6 @@ if submitted:
                 )
 
 
-                # =========================================
-                # GitHub 真的有資料
-                # =========================================
-
                 if saved_confirmed:
 
                     st.success(
@@ -1284,11 +1298,13 @@ if submitted:
                     )
 
 
-                    # =====================================
-                    # 使用 st.html
-                    #
-                    # 不會再把 div 顯示成程式碼
-                    # =====================================
+                    st.caption(
+                        f"資料已寫入："
+                        f"{GITHUB_REPO}/"
+                        f"{actual_path} "
+                        f"（{BRANCH} branch）"
+                    )
+
 
                     result_html = f"""
 <div class="osdi-result">
@@ -1323,15 +1339,29 @@ if submitted:
 
 
                 # =========================================
-                # PUT 說成功但重新讀不到
+                # PUT 成功但 GET 驗證失敗
                 # =========================================
 
                 else:
 
-                    st.warning(
-                        "GitHub API 已回報寫入成功，"
-                        "但系統暫時無法再次確認資料。"
-                        "請至 GitHub 的 osdi_data.csv 確認。"
+                    st.error(
+                        "GitHub 回傳寫入成功，"
+                        "但重新讀取後找不到這筆資料。"
+                    )
+
+                    st.write(
+                        "目前設定的 Repository：",
+                        GITHUB_REPO
+                    )
+
+                    st.write(
+                        "目前設定的 Branch：",
+                        BRANCH
+                    )
+
+                    st.write(
+                        "目前設定的檔案：",
+                        FILE_PATH
                     )
 
 
@@ -1363,24 +1393,23 @@ if submitted:
 
                     detail = result.get(
                         "detail",
-                        result.get(
-                            "error",
-                            ""
-                        )
+                        ""
                     )
 
 
                     if stage:
 
                         st.write(
-                            f"錯誤階段：{stage}"
+                            "錯誤階段：",
+                            stage
                         )
 
 
                     if status_code:
 
                         st.write(
-                            f"HTTP 狀態：{status_code}"
+                            "HTTP 狀態：",
+                            status_code
                         )
 
 
@@ -1403,10 +1432,3 @@ if submitted:
                             st.code(
                                 str(detail)
                             )
-
-
-                else:
-
-                    st.code(
-                        str(result)
-                    )
